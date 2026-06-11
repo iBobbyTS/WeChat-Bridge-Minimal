@@ -1,4 +1,5 @@
 import path from "node:path";
+import fsp from "node:fs/promises";
 import { readJsonFile, writeJsonPrivate } from "../util/fs.js";
 
 export interface WeixinAccountData {
@@ -27,7 +28,12 @@ export class WeixinAccountStore {
     if (!resolvedId) {
       return null;
     }
-    const data = await readJsonFile<Partial<WeixinAccountData> | null>(this.accountPath(resolvedId), null);
+    let data: Partial<WeixinAccountData> | null;
+    try {
+      data = await readJsonFile<Partial<WeixinAccountData> | null>(this.accountPath(resolvedId), null);
+    } catch {
+      return null;
+    }
     if (!data?.accountId || !data.token || !data.baseUrl || !data.userId) {
       return null;
     }
@@ -37,6 +43,22 @@ export class WeixinAccountStore {
   async defaultAccountId(): Promise<string | null> {
     const ids = await readJsonFile<string[]>(this.indexPath(), []);
     return ids.find((id) => typeof id === "string" && id.trim()) ?? null;
+  }
+
+  async hasAnyCredentials(): Promise<boolean> {
+    try {
+      const entries = await fsp.readdir(this.accountsDir, { withFileTypes: true });
+      return entries.some((entry) => entry.isFile() && entry.name.endsWith(".json") && entry.name !== "index.json");
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async clearAll(): Promise<void> {
+    await fsp.rm(this.accountsDir, { recursive: true, force: true });
   }
 
   private accountPath(accountId: string): string {
@@ -50,4 +72,8 @@ export class WeixinAccountStore {
 
 function safeFileName(value: string): string {
   return value.replace(/[^A-Za-z0-9_.@-]/g, "_");
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return Boolean(error && typeof error === "object" && "code" in error);
 }

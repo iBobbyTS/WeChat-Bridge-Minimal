@@ -38,6 +38,15 @@ async function loginCommand(): Promise<void> {
   const stateDir = defaultStateDir();
   const accountStore = new WeixinAccountStore(defaultAccountsDir(stateDir));
   const logger = createStderrLogger(true);
+  if (await accountStore.hasAnyCredentials()) {
+    const answer = await readLine("检测到已有微信登录凭证。是否删除已有凭证并重新登录？输入 y 删除并继续，其他输入退出：");
+    if (!isAffirmative(answer)) {
+      process.stdout.write("已保留现有凭证，取消登录。\n");
+      return;
+    }
+    await accountStore.clearAll();
+    process.stdout.write("已删除现有微信登录凭证，继续登录。\n");
+  }
   const result = await loginWithQr({
     accountStore,
     logger,
@@ -145,6 +154,11 @@ function readLine(prompt: string): Promise<string> {
     };
     process.stdin.on("data", onData);
   });
+}
+
+function isAffirmative(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "y";
 }
 
 function printHelp(): void {
