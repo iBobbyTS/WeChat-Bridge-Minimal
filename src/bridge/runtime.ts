@@ -2,6 +2,7 @@ import path from "node:path";
 import { defaultAccountsDir, defaultStateDir, defaultTokenStoreFile, parsePositiveInt, splitCsv } from "../config.js";
 import { WeixinAccountStore, type WeixinAccountData } from "../weixin/account_store.js";
 import { ContextTokenStore } from "../weixin/context_store.js";
+import { WeixinUpdateCursorStore } from "../weixin/update_cursor_store.js";
 import { WeixinApiClient } from "../weixin/api.js";
 import { buildTextMessage, normalizeInboundMessage } from "../weixin/message.js";
 import { CodexRunner } from "../codex/runner.js";
@@ -18,6 +19,7 @@ export class BridgeRuntime {
   private readonly stateDir: string;
   private readonly accountStore: WeixinAccountStore;
   private readonly contextStore: ContextTokenStore;
+  private readonly updateCursorStore: WeixinUpdateCursorStore;
   private readonly logger: Logger;
   private account: WeixinAccountData | null = null;
   private api: WeixinApiClient | null = null;
@@ -28,6 +30,7 @@ export class BridgeRuntime {
     this.stateDir = path.resolve(options.stateDir ?? defaultStateDir());
     this.accountStore = new WeixinAccountStore(defaultAccountsDir(this.stateDir));
     this.contextStore = new ContextTokenStore(this.stateDir);
+    this.updateCursorStore = new WeixinUpdateCursorStore(this.stateDir);
     this.logger = options.logger ?? createStderrLogger(process.env.WECHAT_BRIDGE_DEBUG === "1");
   }
 
@@ -83,7 +86,7 @@ export class BridgeRuntime {
   }
 
   private async pollLoop(signal: AbortSignal): Promise<void> {
-    let getUpdatesBuf = "";
+    let getUpdatesBuf = await this.updateCursorStore.get();
     let failureCount = 0;
     const codex = this.createCodexRunner();
     while (!signal.aborted) {
@@ -94,6 +97,9 @@ export class BridgeRuntime {
         });
         failureCount = 0;
         getUpdatesBuf = response.get_updates_buf ?? getUpdatesBuf;
+        if (response.get_updates_buf !== undefined) {
+          await this.updateCursorStore.set(getUpdatesBuf);
+        }
         for (const raw of response.msgs ?? []) {
           const inbound = normalizeInboundMessage(raw);
           if (!inbound || inbound.senderId !== this.account?.userId) {

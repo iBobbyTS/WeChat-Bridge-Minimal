@@ -6,7 +6,12 @@ import qrcode from "qrcode-terminal";
 import { defaultAccountsDir, defaultStateDir, defaultTokenStoreFile } from "./config.js";
 import { WeixinAccountStore } from "./weixin/account_store.js";
 import { ContextTokenStore } from "./weixin/context_store.js";
+import { WeixinUpdateCursorStore } from "./weixin/update_cursor_store.js";
 import { loginWithQr } from "./weixin/login.js";
+import {
+  sendLoginHandshakeReply,
+  waitForLoginHandshakeMessage,
+} from "./weixin/login_handshake.js";
 import { WeixinApiClient } from "./weixin/api.js";
 import { buildTextMessage } from "./weixin/message.js";
 import { createStderrLogger } from "./util/logger.js";
@@ -44,6 +49,7 @@ async function loginCommand(): Promise<void> {
   const stateDir = defaultStateDir();
   const accountStore = new WeixinAccountStore(defaultAccountsDir(stateDir));
   const contextStore = new ContextTokenStore(stateDir);
+  const updateCursorStore = new WeixinUpdateCursorStore(stateDir);
   const logger = createStderrLogger(true);
   if (await accountStore.hasAnyCredentials()) {
     const answer = await readLine("检测到已有微信登录凭证。是否删除已有凭证并重新登录？输入 y 删除并继续，其他输入退出：");
@@ -63,30 +69,34 @@ async function loginCommand(): Promise<void> {
     },
     readVerifyCode: (prompt) => readLine(prompt),
   });
-  try {
-    await sendLoginSuccessNotice(result.account, await contextStore.get(result.account.userId));
-    process.stdout.write("微信登录成功回执已发送到手机。\n");
-  } catch (error) {
-    process.stderr.write(`微信登录已成功，但连接成功回执发送失败：${error instanceof Error ? error.message : String(error)}\n`);
-  }
   process.stdout.write(`微信登录成功：账号 ${result.account.accountId}，用户 ${result.account.userId}\n`);
-}
-
-async function sendLoginSuccessNotice(account: {
-  baseUrl: string;
-  token: string;
-  userId: string;
-}, contextToken: string | null): Promise<void> {
-  assertContextToken(contextToken);
   const api = new WeixinApiClient({
-    baseUrl: account.baseUrl,
-    token: account.token,
+    baseUrl: result.account.baseUrl,
+    token: result.account.token,
   });
-  await api.sendMessage(buildTextMessage({
-    toUserId: account.userId,
-    text: "微信桥接已成功连接。",
-    contextToken,
-  }));
+  process.stdout.write("请在手机微信里给这台电脑发送任意消息，例如“你好”。这条消息只用于完成连接，不会发送给 Codex。\n");
+  const handshake = await waitForLoginHandshakeMessage({
+    api,
+    contextStore,
+    updateCursorStore,
+    targetUserId: result.account.userId,
+    onIgnoredMessage: (reason, message) => {
+      if (reason === "wrong_user" && message) {
+        logger.debug(`登录握手已忽略非目标用户消息：${message.senderId}`);
+      }
+    },
+  });
+  process.stdout.write(`已收到手机微信消息并保存上下文令牌：${handshake.senderId}\n`);
+  try {
+    await sendLoginHandshakeReply({
+      api,
+      targetUserId: result.account.userId,
+      contextToken: handshake.contextToken,
+    });
+    process.stdout.write("连接成功回执已发送到手机。\n");
+  } catch (error) {
+    process.stderr.write(`连接成功回执发送失败：${error instanceof Error ? error.message : String(error)}\n`);
+  }
 }
 
 async function testMessageCommand(): Promise<void> {

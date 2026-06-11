@@ -16,6 +16,7 @@ test("WeixinAccountStore detects and clears credential files regardless of valid
   await fsp.mkdir(accountsDir, { recursive: true });
   await fsp.writeFile(path.join(accountsDir, "broken.json"), "{");
   await fsp.writeFile(path.join(dir, "auth", "context-tokens.json"), "{}");
+  await fsp.writeFile(path.join(dir, "auth", "get-updates-cursor.json"), "{}");
   assert.equal(await store.hasAnyCredentials(), true);
   assert.equal(await store.load("broken"), null);
 
