@@ -11,26 +11,21 @@ export interface WeixinAccountData {
 }
 
 export class WeixinAccountStore {
-  constructor(private readonly accountsDir: string) {}
+  constructor(private readonly authDir: string) {}
 
   async save(data: Omit<WeixinAccountData, "savedAt">): Promise<WeixinAccountData> {
     const saved: WeixinAccountData = {
       ...data,
       savedAt: new Date().toISOString(),
     };
-    await writeJsonPrivate(this.accountPath(data.accountId), saved);
-    await writeJsonPrivate(this.indexPath(), [data.accountId]);
+    await writeJsonPrivate(this.accountPath(), saved);
     return saved;
   }
 
-  async load(accountId?: string | null): Promise<WeixinAccountData | null> {
-    const resolvedId = accountId?.trim() || (await this.defaultAccountId());
-    if (!resolvedId) {
-      return null;
-    }
+  async load(): Promise<WeixinAccountData | null> {
     let data: Partial<WeixinAccountData> | null;
     try {
-      data = await readJsonFile<Partial<WeixinAccountData> | null>(this.accountPath(resolvedId), null);
+      data = await readJsonFile<Partial<WeixinAccountData> | null>(this.accountPath(), null);
     } catch {
       return null;
     }
@@ -40,15 +35,10 @@ export class WeixinAccountStore {
     return data as WeixinAccountData;
   }
 
-  async defaultAccountId(): Promise<string | null> {
-    const ids = await readJsonFile<string[]>(this.indexPath(), []);
-    return ids.find((id) => typeof id === "string" && id.trim()) ?? null;
-  }
-
   async hasAnyCredentials(): Promise<boolean> {
     try {
-      const entries = await fsp.readdir(this.accountsDir, { withFileTypes: true });
-      return entries.some((entry) => entry.isFile() && entry.name.endsWith(".json") && entry.name !== "index.json");
+      const stat = await fsp.stat(this.authDir);
+      return stat.isDirectory();
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
         return false;
@@ -58,20 +48,12 @@ export class WeixinAccountStore {
   }
 
   async clearAll(): Promise<void> {
-    await fsp.rm(path.dirname(this.accountsDir), { recursive: true, force: true });
+    await fsp.rm(this.authDir, { recursive: true, force: true });
   }
 
-  private accountPath(accountId: string): string {
-    return path.join(this.accountsDir, `${safeFileName(accountId)}.json`);
+  private accountPath(): string {
+    return path.join(this.authDir, "account.json");
   }
-
-  private indexPath(): string {
-    return path.join(this.accountsDir, "index.json");
-  }
-}
-
-function safeFileName(value: string): string {
-  return value.replace(/[^A-Za-z0-9_.@-]/g, "_");
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

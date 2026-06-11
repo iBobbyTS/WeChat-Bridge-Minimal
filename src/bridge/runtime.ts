@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defaultAccountsDir, defaultStateDir, defaultTokenStoreFile, parsePositiveInt, splitCsv } from "../config.js";
+import { defaultAuthDir, defaultStateDir, defaultTokenStoreFile, parsePositiveInt, splitCsv } from "../config.js";
 import { WeixinAccountStore, type WeixinAccountData } from "../weixin/account_store.js";
 import { ContextTokenStore } from "../weixin/context_store.js";
 import { WeixinUpdateCursorStore } from "../weixin/update_cursor_store.js";
@@ -28,7 +28,7 @@ export class BridgeRuntime {
 
   constructor(options: BridgeRuntimeOptions = {}) {
     this.stateDir = path.resolve(options.stateDir ?? defaultStateDir());
-    this.accountStore = new WeixinAccountStore(defaultAccountsDir(this.stateDir));
+    this.accountStore = new WeixinAccountStore(defaultAuthDir(this.stateDir));
     this.contextStore = new ContextTokenStore(this.stateDir);
     this.updateCursorStore = new WeixinUpdateCursorStore(this.stateDir);
     this.logger = options.logger ?? createStderrLogger(process.env.WECHAT_BRIDGE_DEBUG === "1");

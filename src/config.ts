@@ -24,10 +24,6 @@ export function defaultAuthDir(stateDir: string): string {
   return path.join(stateDir, "auth");
 }
 
-export function defaultAccountsDir(stateDir: string): string {
-  return path.join(defaultAuthDir(stateDir), "accounts");
-}
-
 export function parsePositiveInt(value: unknown): number | null {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;

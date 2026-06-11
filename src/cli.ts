@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
-import { defaultAccountsDir, defaultStateDir, defaultTokenStoreFile } from "./config.js";
+import { defaultAuthDir, defaultStateDir, defaultTokenStoreFile } from "./config.js";
 import { WeixinAccountStore } from "./weixin/account_store.js";
 import { ContextTokenStore } from "./weixin/context_store.js";
 import { WeixinUpdateCursorStore } from "./weixin/update_cursor_store.js";
@@ -47,7 +47,7 @@ async function main(argv: string[]): Promise<void> {
 
 async function loginCommand(): Promise<void> {
   const stateDir = defaultStateDir();
-  const accountStore = new WeixinAccountStore(defaultAccountsDir(stateDir));
+  const accountStore = new WeixinAccountStore(defaultAuthDir(stateDir));
   const contextStore = new ContextTokenStore(stateDir);
   const updateCursorStore = new WeixinUpdateCursorStore(stateDir);
   const logger = createStderrLogger(true);
@@ -101,7 +101,7 @@ async function loginCommand(): Promise<void> {
 
 async function testMessageCommand(): Promise<void> {
   const stateDir = defaultStateDir();
-  const accountStore = new WeixinAccountStore(defaultAccountsDir(stateDir));
+  const accountStore = new WeixinAccountStore(defaultAuthDir(stateDir));
   const contextStore = new ContextTokenStore(stateDir);
   const account = await accountStore.load();
   if (!account) {
