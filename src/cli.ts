@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 import { defaultAccountsDir, defaultStateDir, defaultTokenStoreFile } from "./config.js";
 import { WeixinAccountStore } from "./weixin/account_store.js";
+import { ContextTokenStore } from "./weixin/context_store.js";
 import { loginWithQr } from "./weixin/login.js";
 import { WeixinApiClient } from "./weixin/api.js";
 import { buildTextMessage } from "./weixin/message.js";
 import { createStderrLogger } from "./util/logger.js";
+import { formatLocalDateTime } from "./util/time.js";
 import { addToken, ensureDefaultTokens, readTokenStore, removeToken } from "./api/token_store.js";
 import { BridgeRuntime } from "./bridge/runtime.js";
 
@@ -20,6 +23,9 @@ async function main(argv: string[]): Promise<void> {
       return;
     case "serve":
       await serveCommand();
+      return;
+    case "test-message":
+      await testMessageCommand();
       return;
     case "send-api-token":
       await tokenCommand(args.slice(1));
@@ -37,6 +43,7 @@ async function main(argv: string[]): Promise<void> {
 async function loginCommand(): Promise<void> {
   const stateDir = defaultStateDir();
   const accountStore = new WeixinAccountStore(defaultAccountsDir(stateDir));
+  const contextStore = new ContextTokenStore(stateDir);
   const logger = createStderrLogger(true);
   if (await accountStore.hasAnyCredentials()) {
     const answer = await readLine("检测到已有微信登录凭证。是否删除已有凭证并重新登录？输入 y 删除并继续，其他输入退出：");
@@ -57,7 +64,7 @@ async function loginCommand(): Promise<void> {
     readVerifyCode: (prompt) => readLine(prompt),
   });
   try {
-    await sendLoginSuccessNotice(result.account);
+    await sendLoginSuccessNotice(result.account, await contextStore.get(result.account.userId));
     process.stdout.write("微信登录成功回执已发送到手机。\n");
   } catch (error) {
     process.stderr.write(`微信登录已成功，但连接成功回执发送失败：${error instanceof Error ? error.message : String(error)}\n`);
@@ -69,7 +76,8 @@ async function sendLoginSuccessNotice(account: {
   baseUrl: string;
   token: string;
   userId: string;
-}): Promise<void> {
+}, contextToken: string | null): Promise<void> {
+  assertContextToken(contextToken);
   const api = new WeixinApiClient({
     baseUrl: account.baseUrl,
     token: account.token,
@@ -77,7 +85,41 @@ async function sendLoginSuccessNotice(account: {
   await api.sendMessage(buildTextMessage({
     toUserId: account.userId,
     text: "微信桥接已成功连接。",
+    contextToken,
   }));
+}
+
+async function testMessageCommand(): Promise<void> {
+  const stateDir = defaultStateDir();
+  const accountStore = new WeixinAccountStore(defaultAccountsDir(stateDir));
+  const contextStore = new ContextTokenStore(stateDir);
+  const account = await accountStore.load();
+  if (!account) {
+    throw new Error("没有可用的微信登录凭证，请先运行 npm run weixin:login。");
+  }
+  const text = buildTestMessageText();
+  const contextToken = await contextStore.get(account.userId);
+  assertContextToken(contextToken);
+  const api = new WeixinApiClient({
+    baseUrl: account.baseUrl,
+    token: account.token,
+  });
+  await api.sendMessage(buildTextMessage({
+    toUserId: account.userId,
+    text,
+    contextToken,
+  }));
+  process.stdout.write(`测试消息已发送到手机：${account.userId}\n`);
+}
+
+function assertContextToken(contextToken: string | null): asserts contextToken is string {
+  if (!contextToken) {
+    throw new Error("没有可用的微信上下文令牌。请先在手机微信里给桥接账号发送任意一条消息，然后再重试。");
+  }
+}
+
+export function buildTestMessageText(date = new Date()): string {
+  return `测试消息。\n发送时间: ${formatLocalDateTime(date)}`;
 }
 
 async function serveCommand(): Promise<void> {
@@ -167,13 +209,21 @@ function isAffirmative(value: string): boolean {
 function printHelp(): void {
   process.stdout.write(`用法：
   wechat-bridge-minimal weixin login
+  wechat-bridge-minimal weixin test-message
   wechat-bridge-minimal weixin serve
   wechat-bridge-minimal weixin send-api-token ensure-defaults|list|add|remove
 `);
 }
 
-main(process.argv.slice(2)).catch(async (error) => {
-  await fsp.mkdir(path.join(defaultStateDir(), "logs"), { recursive: true }).catch(() => {});
-  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
-  process.exitCode = 1;
-});
+if (isCliEntrypoint()) {
+  main(process.argv.slice(2)).catch(async (error) => {
+    await fsp.mkdir(path.join(defaultStateDir(), "logs"), { recursive: true }).catch(() => {});
+    process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
+
+function isCliEntrypoint(): boolean {
+  const entry = process.argv[1];
+  return Boolean(entry && path.resolve(entry) === fileURLToPath(import.meta.url));
+}
