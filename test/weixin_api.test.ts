@@ -34,6 +34,30 @@ test("WeixinApiClient builds official sendmessage request headers and body", () 
   assert.equal(body.msg?.item_list?.[0]?.text_item?.text, "hello");
 });
 
+test("WeixinApiClient sends login success text without requiring context token", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const client = new WeixinApiClient({
+    baseUrl: "https://example.invalid",
+    token: "secret",
+    fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch,
+  });
+
+  await client.sendMessage(buildTextMessage({
+    toUserId: "user-1",
+    text: "微信桥接已成功连接。",
+  }));
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.url, "https://example.invalid/ilink/bot/sendmessage");
+  const body = JSON.parse(String(calls[0]?.init.body)) as { msg: { to_user_id: string; context_token?: string; item_list: Array<{ text_item?: { text?: string } }> } };
+  assert.equal(body.msg.to_user_id, "user-1");
+  assert.equal(body.msg.context_token, undefined);
+  assert.equal(body.msg.item_list[0]?.text_item?.text, "微信桥接已成功连接。");
+});
+
 test("extractTextFromItems handles text, quote, and voice text", () => {
   assert.equal(
     extractTextFromItems([{ type: MessageItemType.TEXT, text_item: { text: "plain" } }]),

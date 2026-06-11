@@ -27,7 +27,7 @@ export async function loginWithQr(options: LoginOptions): Promise<LoginResult> {
     throw new Error("Weixin QR response did not include qrcode data.");
   }
   await options.displayQr?.(qr.qrcode_img_content);
-  logger.info("Waiting for Weixin QR confirmation...");
+  logger.info("正在等待微信扫码确认...");
 
   let pollBaseUrl = DEFAULT_WEIXIN_BASE_URL;
   const deadline = Date.now() + (options.timeoutMs ?? 480_000);

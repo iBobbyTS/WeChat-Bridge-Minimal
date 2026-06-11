@@ -5,6 +5,8 @@ import qrcode from "qrcode-terminal";
 import { defaultAccountsDir, defaultStateDir, defaultTokenStoreFile } from "./config.js";
 import { WeixinAccountStore } from "./weixin/account_store.js";
 import { loginWithQr } from "./weixin/login.js";
+import { WeixinApiClient } from "./weixin/api.js";
+import { buildTextMessage } from "./weixin/message.js";
 import { createStderrLogger } from "./util/logger.js";
 import { addToken, ensureDefaultTokens, readTokenStore, removeToken } from "./api/token_store.js";
 import { BridgeRuntime } from "./bridge/runtime.js";
@@ -28,23 +30,42 @@ async function main(argv: string[]): Promise<void> {
       printHelp();
       return;
     default:
-      throw new Error(`Unknown command: ${command}`);
+      throw new Error(`未知命令：${command}`);
   }
 }
 
 async function loginCommand(): Promise<void> {
   const stateDir = defaultStateDir();
   const accountStore = new WeixinAccountStore(defaultAccountsDir(stateDir));
+  const logger = createStderrLogger(true);
   const result = await loginWithQr({
     accountStore,
-    logger: createStderrLogger(true),
+    logger,
     displayQr: (url) => {
       qrcode.generate(url, { small: true });
       process.stdout.write(`${url}\n`);
     },
     readVerifyCode: (prompt) => readLine(prompt),
   });
-  process.stdout.write(`Logged in Weixin account ${result.account.accountId}, user ${result.account.userId}\n`);
+  await sendLoginSuccessNotice(result.account).catch((error) => {
+    logger.warn(`微信登录已成功，但连接成功回执发送失败：${error instanceof Error ? error.message : String(error)}`);
+  });
+  process.stdout.write(`微信登录成功：账号 ${result.account.accountId}，用户 ${result.account.userId}\n`);
+}
+
+async function sendLoginSuccessNotice(account: {
+  baseUrl: string;
+  token: string;
+  userId: string;
+}): Promise<void> {
+  const api = new WeixinApiClient({
+    baseUrl: account.baseUrl,
+    token: account.token,
+  });
+  await api.sendMessage(buildTextMessage({
+    toUserId: account.userId,
+    text: "微信桥接已成功连接。",
+  }));
 }
 
 async function serveCommand(): Promise<void> {
@@ -73,30 +94,30 @@ async function tokenCommand(args: string[]): Promise<void> {
     case "add": {
       const name = readOption(args, "--name") ?? args[1];
       if (!name) {
-        throw new Error("Usage: send-api-token add --name <name> [--token <token>]");
+        throw new Error("用法：send-api-token add --name <名称> [--token <令牌>]");
       }
       const token = await addToken(tokenFile, name, readOption(args, "--token") ?? undefined);
-      process.stdout.write(`Added token for ${name}: ${token}\n`);
+      process.stdout.write(`已为 ${name} 添加令牌：${token}\n`);
       return;
     }
     case "remove": {
       const token = readOption(args, "--token") ?? args[1];
       if (!token) {
-        throw new Error("Usage: send-api-token remove --token <token>");
+        throw new Error("用法：send-api-token remove --token <令牌>");
       }
       const removed = await removeToken(tokenFile, token);
-      process.stdout.write(removed ? "Removed token.\n" : "Token not found.\n");
+      process.stdout.write(removed ? "已删除令牌。\n" : "未找到令牌。\n");
       return;
     }
     default:
-      throw new Error(`Unknown send-api-token command: ${subcommand}`);
+      throw new Error(`未知 send-api-token 命令：${subcommand}`);
   }
 }
 
 function printTokenList(store: Awaited<ReturnType<typeof readTokenStore>>): void {
   const entries = Object.entries(store);
   if (!entries.length) {
-    process.stdout.write("(no tokens)\n");
+    process.stdout.write("（没有令牌）\n");
     return;
   }
   for (const [token, record] of entries) {
@@ -127,7 +148,7 @@ function readLine(prompt: string): Promise<string> {
 }
 
 function printHelp(): void {
-  process.stdout.write(`Usage:
+  process.stdout.write(`用法：
   wechat-bridge-minimal weixin login
   wechat-bridge-minimal weixin serve
   wechat-bridge-minimal weixin send-api-token ensure-defaults|list|add|remove

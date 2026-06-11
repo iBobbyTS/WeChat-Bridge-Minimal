@@ -105,12 +105,12 @@ export class BridgeRuntime {
           void codex.ask(inbound.text)
             .then((reply) => this.sendTextToWeixin(inbound.senderId, reply))
             .catch((error) => {
-              this.logger.error(`Codex turn failed: ${error instanceof Error ? error.message : String(error)}`);
+              this.logger.error(`Codex 对话处理失败：${error instanceof Error ? error.message : String(error)}`);
             });
         }
       } catch (error) {
         failureCount += 1;
-        this.logger.warn(`Weixin poll failed: ${error instanceof Error ? error.message : String(error)}`);
+        this.logger.warn(`微信消息轮询失败：${error instanceof Error ? error.message : String(error)}`);
         await sleep(Math.min(30_000, 1_000 * 2 ** Math.min(failureCount, 5)));
       }
     }
