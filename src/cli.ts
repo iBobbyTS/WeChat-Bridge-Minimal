@@ -56,9 +56,12 @@ async function loginCommand(): Promise<void> {
     },
     readVerifyCode: (prompt) => readLine(prompt),
   });
-  await sendLoginSuccessNotice(result.account).catch((error) => {
-    logger.warn(`微信登录已成功，但连接成功回执发送失败：${error instanceof Error ? error.message : String(error)}`);
-  });
+  try {
+    await sendLoginSuccessNotice(result.account);
+    process.stdout.write("微信登录成功回执已发送到手机。\n");
+  } catch (error) {
+    process.stderr.write(`微信登录已成功，但连接成功回执发送失败：${error instanceof Error ? error.message : String(error)}\n`);
+  }
   process.stdout.write(`微信登录成功：账号 ${result.account.accountId}，用户 ${result.account.userId}\n`);
 }
 

@@ -37,6 +37,16 @@ export class WeixinHttpError extends Error {
   }
 }
 
+export class WeixinApiResponseError extends Error {
+  constructor(
+    readonly label: string,
+    readonly body: Record<string, unknown>,
+  ) {
+    super(`${label} 返回失败：ret=${String(body.ret ?? "")} errcode=${String(body.errcode ?? "")} errmsg=${String(body.errmsg ?? "")}`);
+    this.name = "WeixinApiResponseError";
+  }
+}
+
 export class WeixinApiClient {
   private readonly baseUrl: string;
   private readonly token?: string;
@@ -238,7 +248,32 @@ async function parseJsonResponse<T>(label: string, response: Response): Promise<
   if (!response.ok) {
     throw new WeixinHttpError(label, response.status, text);
   }
-  return JSON.parse(text) as T;
+  const parsed = JSON.parse(text) as T;
+  if (isFailedWeixinResponse(parsed)) {
+    throw new WeixinApiResponseError(label, parsed);
+  }
+  return parsed;
+}
+
+function isFailedWeixinResponse(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const body = value as Record<string, unknown>;
+  const ret = numericField(body.ret);
+  const errcode = numericField(body.errcode);
+  return (ret !== null && ret !== 0) || (errcode !== null && errcode !== 0);
+}
+
+function numericField(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function combineSignals(left?: AbortSignal, right?: AbortSignal | null): AbortSignal | undefined {

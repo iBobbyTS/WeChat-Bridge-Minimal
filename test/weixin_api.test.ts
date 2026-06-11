@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { WeixinApiClient } from "../src/weixin/api.js";
+import { WeixinApiClient, WeixinApiResponseError } from "../src/weixin/api.js";
 import { buildTextMessage, extractTextFromItems, normalizeInboundMessage } from "../src/weixin/message.js";
 import { MessageItemType, MessageType, type SendMessageReq } from "../src/weixin/types.js";
 
@@ -56,6 +56,25 @@ test("WeixinApiClient sends login success text without requiring context token",
   assert.equal(body.msg.to_user_id, "user-1");
   assert.equal(body.msg.context_token, undefined);
   assert.equal(body.msg.item_list[0]?.text_item?.text, "微信桥接已成功连接。");
+});
+
+test("WeixinApiClient treats non-zero Weixin ret as failure", async () => {
+  const client = new WeixinApiClient({
+    baseUrl: "https://example.invalid",
+    token: "secret",
+    fetchImpl: (async () => new Response(JSON.stringify({
+      ret: -2,
+      errmsg: "context token required",
+    }), { status: 200 })) as typeof fetch,
+  });
+
+  await assert.rejects(
+    () => client.sendMessage(buildTextMessage({
+      toUserId: "user-1",
+      text: "微信桥接已成功连接。",
+    })),
+    WeixinApiResponseError,
+  );
 });
 
 test("extractTextFromItems handles text, quote, and voice text", () => {
