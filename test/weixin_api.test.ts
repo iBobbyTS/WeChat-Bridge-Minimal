@@ -59,6 +59,39 @@ test("WeixinApiClient sends login handshake reply with context token", async () 
   assert.equal(body.msg.item_list[0]?.text_item?.text, "已成功连接。\n当前时间：2026-06-11 01:02:03。");
 });
 
+test("WeixinApiClient builds getconfig and sendtyping payloads", async () => {
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const client = new WeixinApiClient({
+    baseUrl: "https://example.invalid",
+    token: "secret",
+    fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      });
+      return new Response(JSON.stringify({ typing_ticket: "ticket-1" }), { status: 200 });
+    }) as typeof fetch,
+  });
+
+  await client.getConfig({
+    userId: "user-1",
+    contextToken: "ctx-token",
+  });
+  await client.sendTyping({
+    userId: "user-1",
+    typingTicket: "ticket-1",
+    status: 1,
+  });
+
+  assert.equal(calls[0]?.url, "https://example.invalid/ilink/bot/getconfig");
+  assert.equal(calls[0]?.body.ilink_user_id, "user-1");
+  assert.equal(calls[0]?.body.context_token, "ctx-token");
+  assert.equal(calls[1]?.url, "https://example.invalid/ilink/bot/sendtyping");
+  assert.equal(calls[1]?.body.ilink_user_id, "user-1");
+  assert.equal(calls[1]?.body.typing_ticket, "ticket-1");
+  assert.equal(calls[1]?.body.status, 1);
+});
+
 test("WeixinApiClient treats non-zero Weixin ret as failure", async () => {
   const client = new WeixinApiClient({
     baseUrl: "https://example.invalid",

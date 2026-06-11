@@ -55,12 +55,14 @@ test("CodexRunner creates first thread then resumes it serially", async () => {
   const sessionsRoot = path.join(dir, "sessions");
   await fsp.mkdir(cwd, { recursive: true });
   const calls: string[][] = [];
+  const outputPaths: string[] = [];
 
   const runner = new CodexRunner({
     stateDir: dir,
     cwd,
     sessionsRoot,
     codexBin: "codex",
+    inputSender: "bot@example",
     spawnImpl: ((_cmd: string, args: readonly string[], options?: { cwd?: string }) => {
       calls.push([...args]);
       const child = new EventEmitter() as EventEmitter & {
@@ -74,6 +76,7 @@ test("CodexRunner creates first thread then resumes it serially", async () => {
       queueMicrotask(async () => {
         const outputIndex = args.indexOf("--output-last-message");
         const outputPath = outputIndex >= 0 ? args[outputIndex + 1] : "";
+        outputPaths.push(String(outputPath));
         if (calls.length === 1) {
           const sessionDir = path.join(sessionsRoot, "2026", "06", "10");
           await fsp.mkdir(sessionDir, { recursive: true });
@@ -104,6 +107,15 @@ test("CodexRunner creates first thread then resumes it serially", async () => {
   ]);
   assert.deepEqual(calls[0]?.slice(-1), ["-"]);
   assert.deepEqual(calls[1]?.slice(-3), ["resume", "thread-abc", "-"]);
+  assert.equal(outputPaths.every((filePath) => !path.basename(filePath).startsWith("codex-output-")), true);
+  for (const outputPath of outputPaths) {
+    await assert.rejects(() => fsp.stat(outputPath), /ENOENT/);
+  }
+  const transcript = await readJsonLines(path.join(dir, "messages.jsonl"));
+  assert.deepEqual(transcript.map((entry) => entry.sender), ["bot@example", "codex", "bot@example", "codex"]);
+  assert.deepEqual(transcript.map((entry) => entry.message), ["one", "reply-1", "two", "reply-2"]);
+  assert.equal(transcript.every((entry) => typeof entry.ts === "number" && entry.ts > 0), true);
+  assert.equal(transcript.every((entry) => Object.keys(entry).sort().join(",") === "message,sender,ts"), true);
 });
 
 test("CodexRunner askExisting requires a saved thread and does not create one from user prompt", async () => {
@@ -189,4 +201,9 @@ async function writeSessionFile(
     }),
     "",
   ].join("\n"));
+}
+
+async function readJsonLines(filePath: string): Promise<Array<Record<string, unknown>>> {
+  const content = await fsp.readFile(filePath, "utf8");
+  return content.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
 }

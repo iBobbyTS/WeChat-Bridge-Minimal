@@ -1,6 +1,8 @@
 import { spawn as defaultSpawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { readJsonFile, writeJsonPrivate } from "../util/fs.js";
 import {
@@ -22,6 +24,8 @@ export interface CodexRunnerOptions {
   sessionsRoot?: string;
   spawnImpl?: SpawnLike;
   outputDir?: string;
+  inputSender?: string;
+  transcriptFile?: string;
 }
 
 export interface CodexRunnerState {
@@ -65,12 +69,21 @@ export class CodexRunner {
       throw new MissingCodexThreadError();
     }
     const startedAtMs = Date.now();
-    const outputFile = path.join(this.options.outputDir ?? this.options.stateDir, `codex-output-${startedAtMs}.txt`);
+    const outputFile = this.outputPath(startedAtMs);
     const sessionsRoot = this.options.sessionsRoot ?? defaultCodexSessionsRoot();
     const knownSessionFiles = state.threadId ? null : listCodexSessionFiles(sessionsRoot);
     const args = this.buildArgs(state.threadId, outputFile);
-    const { stdout, stderr } = await this.spawnCodex(args, prompt);
-    const finalText = readOutputFile(outputFile) || stdout.trim();
+    let stdout = "";
+    let stderr = "";
+    let finalText = "";
+    try {
+      const result = await this.spawnCodex(args, prompt, outputFile);
+      stdout = result.stdout;
+      stderr = result.stderr;
+      finalText = readOutputFile(outputFile) || stdout.trim();
+    } finally {
+      removeFileIfExists(outputFile);
+    }
     if (!finalText) {
       throw new Error(`Codex returned an empty response.${stderr.trim() ? ` stderr: ${stderr.trim()}` : ""}`);
     }
@@ -87,6 +100,7 @@ export class CodexRunner {
       }
       await writeJsonPrivate(this.statePath(), { threadId: session.threadId });
     }
+    await this.appendTranscript(prompt, finalText, startedAtMs);
     return finalText;
   }
 
@@ -115,9 +129,9 @@ export class CodexRunner {
     return args;
   }
 
-  private spawnCodex(args: string[], prompt: string): Promise<{ stdout: string; stderr: string }> {
+  private spawnCodex(args: string[], prompt: string, outputFile: string): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-      fs.mkdirSync(this.options.outputDir ?? this.options.stateDir, { recursive: true });
+      fs.mkdirSync(path.dirname(outputFile), { recursive: true });
       const spawnImpl = this.options.spawnImpl ?? defaultSpawn;
       const child = spawnImpl(this.options.codexBin ?? "codex", args, {
         cwd: this.options.cwd,
@@ -147,6 +161,24 @@ export class CodexRunner {
   private statePath(): string {
     return path.join(this.options.stateDir, "codex-thread.json");
   }
+
+  private outputPath(startedAtMs: number): string {
+    const dir = this.options.outputDir ?? path.join(this.options.stateDir, "tmp");
+    return path.join(dir, `codex-last-message-${startedAtMs}-${crypto.randomUUID()}.txt`);
+  }
+
+  private async appendTranscript(prompt: string, finalText: string, startedAtMs: number): Promise<void> {
+    const filePath = this.options.transcriptFile ?? path.join(this.options.stateDir, "messages.jsonl");
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+    const inputSender = normalizeInputSender(this.options.inputSender);
+    const lines = [
+      JSON.stringify({ ts: startedAtMs, sender: inputSender, message: prompt }),
+      JSON.stringify({ ts: Date.now(), sender: "codex", message: finalText }),
+      "",
+    ].join("\n");
+    await fsp.appendFile(filePath, lines, { encoding: "utf8", mode: 0o600 });
+    await fsp.chmod(filePath, 0o600).catch(() => {});
+  }
 }
 
 function readOutputFile(filePath: string): string {
@@ -155,4 +187,20 @@ function readOutputFile(filePath: string): string {
   } catch {
     return "";
   }
+}
+
+function removeFileIfExists(filePath: string): void {
+  try {
+    fs.rmSync(filePath, { force: true });
+  } catch {
+    // 临时输出文件删除失败不影响主流程；文件名不再作为持久记录使用。
+  }
+}
+
+function normalizeInputSender(inputSender: string | undefined): string {
+  const normalized = inputSender?.trim();
+  if (!normalized) {
+    throw new Error("缺少 Codex 对话消息发送者 accountId，无法写入 messages.jsonl。");
+  }
+  return normalized;
 }

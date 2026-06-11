@@ -100,6 +100,7 @@ async function loginCommand(): Promise<void> {
     const codexSession = await initializeCodexSession({
       stateDir,
       cwd: process.cwd(),
+      inputSender: result.account.accountId,
       logger,
       forceNew: true,
     });

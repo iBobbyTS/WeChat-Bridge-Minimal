@@ -1,5 +1,12 @@
 import crypto from "node:crypto";
-import type { GetUpdatesResp, QrCodeResponse, QrStatusResponse, SendMessageReq } from "./types.js";
+import type {
+  GetConfigResp,
+  GetUpdatesResp,
+  QrCodeResponse,
+  QrStatusResponse,
+  SendMessageReq,
+  SendTypingResp,
+} from "./types.js";
 
 export type FetchLike = typeof fetch;
 
@@ -134,6 +141,40 @@ export class WeixinApiClient {
         base_info: this.buildBaseInfo(),
       },
       timeoutMs,
+    });
+  }
+
+  async getConfig(params: {
+    userId: string;
+    contextToken?: string | null;
+    timeoutMs?: number;
+  }): Promise<GetConfigResp> {
+    return this.postJson<GetConfigResp>({
+      endpoint: "ilink/bot/getconfig",
+      label: "getConfig",
+      body: {
+        ilink_user_id: params.userId,
+        ...(params.contextToken ? { context_token: params.contextToken } : {}),
+      },
+      timeoutMs: params.timeoutMs ?? 15_000,
+    });
+  }
+
+  async sendTyping(params: {
+    userId: string;
+    typingTicket: string;
+    status: number;
+    timeoutMs?: number;
+  }): Promise<SendTypingResp> {
+    return this.postJson<SendTypingResp>({
+      endpoint: "ilink/bot/sendtyping",
+      label: "sendTyping",
+      body: {
+        ilink_user_id: params.userId,
+        typing_ticket: params.typingTicket,
+        status: params.status,
+      },
+      timeoutMs: params.timeoutMs ?? 15_000,
     });
   }
 

@@ -69,6 +69,19 @@ export interface SendMessageReq {
   msg?: WeixinMessage;
 }
 
+export interface GetConfigResp {
+  ret?: number;
+  errcode?: number;
+  errmsg?: string;
+  typing_ticket?: string;
+}
+
+export interface SendTypingResp {
+  ret?: number;
+  errcode?: number;
+  errmsg?: string;
+}
+
 export interface QrCodeResponse {
   qrcode?: string;
   qrcode_img_content?: string;

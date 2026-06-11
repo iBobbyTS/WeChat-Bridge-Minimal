@@ -8,6 +8,7 @@ export interface CodexSessionInitializerOptions {
   stateDir: string;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  inputSender?: string;
   logger?: Pick<Logger, "info" | "warn">;
   runner?: Pick<CodexRunner, "getState" | "startNewSession">;
   forceNew?: boolean;
@@ -21,6 +22,7 @@ export async function initializeCodexSession(options: CodexSessionInitializerOpt
     stateDir: options.stateDir,
     env: options.env,
     cwd: options.cwd,
+    inputSender: options.inputSender,
   }));
   const before = options.forceNew ? {} : await runner.getState();
   if (!options.forceNew && before.threadId) {
@@ -43,6 +45,7 @@ export async function askCodexWithInitializedSession(options: {
   prompt: string;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  inputSender?: string;
   logger?: Pick<Logger, "info" | "warn">;
   runner?: Pick<CodexRunner, "askExisting" | "getState" | "startNewSession">;
 }): Promise<string> {
@@ -50,6 +53,7 @@ export async function askCodexWithInitializedSession(options: {
     stateDir: options.stateDir,
     env: options.env,
     cwd: options.cwd,
+    inputSender: options.inputSender,
   }));
   try {
     return await runner.askExisting(options.prompt);
@@ -63,6 +67,7 @@ export async function askCodexWithInitializedSession(options: {
       stateDir: options.stateDir,
       env: options.env,
       cwd: options.cwd,
+      inputSender: options.inputSender,
       logger: options.logger,
       runner,
       forceNew: true,
@@ -75,6 +80,7 @@ export function createDefaultCodexRunnerOptions(params: {
   stateDir: string;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  inputSender?: string;
 }): CodexRunnerOptions {
   const env = params.env ?? process.env;
   return {
@@ -85,5 +91,6 @@ export function createDefaultCodexRunnerOptions(params: {
     profile: env.CODEX_PROFILE?.trim() || undefined,
     sandbox: env.CODEX_SANDBOX?.trim() || "read-only",
     approval: env.CODEX_APPROVAL?.trim() || "never",
+    inputSender: params.inputSender,
   };
 }
