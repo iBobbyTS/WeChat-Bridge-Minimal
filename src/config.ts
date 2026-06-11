@@ -20,6 +20,10 @@ export function defaultTokenStoreFile(stateDir: string): string {
   return path.join(stateDir, "send-api-tokens.json");
 }
 
+export function defaultAllowedIpStoreFile(stateDir: string): string {
+  return path.join(stateDir, "send-api-allowed-ips.json");
+}
+
 export function defaultAuthDir(stateDir: string): string {
   return path.join(stateDir, "auth");
 }

@@ -1,4 +1,5 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import { readAllowedIpStore, normalizeRemoteAddress } from "./allowed_ip_store.js";
 import { authenticateBearer, readTokenStore } from "./token_store.js";
 import { readLimitedBody, normalizeRequiredString } from "../util/http.js";
 
@@ -6,7 +7,7 @@ export interface LocalSendApiOptions {
   host: string;
   port: number;
   tokenStoreFile: string;
-  allowedIps: string[];
+  allowedIpStoreFile: string;
   targetUserId: string;
   maxBodyBytes?: number;
   sendText: (text: string) => Promise<unknown>;
@@ -45,7 +46,8 @@ export async function handleLocalSendApiRequest(
   response: ServerResponse,
   options: LocalSendApiOptions,
 ): Promise<void> {
-  if (!isAllowedRemoteAddress(request.socket.remoteAddress, options.allowedIps)) {
+  const allowedIps = await readAllowedIpStore(options.allowedIpStoreFile).catch(() => []);
+  if (!isAllowedRemoteAddress(request.socket.remoteAddress, allowedIps)) {
     writeJson(response, 403, { success: false, error: "forbidden_ip" });
     return;
   }
@@ -97,30 +99,9 @@ export async function handleLocalSendApiRequest(
   }
 }
 
-export function normalizeAllowedIps(values: string[]): string[] {
-  const normalized = values.flatMap((value) => String(value).split(","))
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .flatMap((value) => value === "localhost" ? ["127.0.0.1"] : [normalizeRemoteAddress(value) ?? value]);
-  return Array.from(new Set(normalized));
-}
-
 function isAllowedRemoteAddress(remoteAddress: string | undefined, allowedIps: string[]): boolean {
   const normalized = normalizeRemoteAddress(remoteAddress);
   return Boolean(normalized && allowedIps.includes(normalized));
-}
-
-function normalizeRemoteAddress(remoteAddress: string | undefined): string | null {
-  if (!remoteAddress) {
-    return null;
-  }
-  if (remoteAddress.startsWith("::ffff:")) {
-    return remoteAddress.slice("::ffff:".length);
-  }
-  if (remoteAddress === "::1") {
-    return "127.0.0.1";
-  }
-  return remoteAddress;
 }
 
 function writeJson(response: ServerResponse, statusCode: number, body: unknown): void {

@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
-import { defaultAuthDir, defaultStateDir, defaultTokenStoreFile } from "./config.js";
+import { defaultAllowedIpStoreFile, defaultAuthDir, defaultStateDir, defaultTokenStoreFile } from "./config.js";
 import { WeixinAccountStore } from "./weixin/account_store.js";
 import { ContextTokenStore } from "./weixin/context_store.js";
 import { loginWithQr } from "./weixin/login.js";
@@ -16,6 +16,12 @@ import { buildTextMessage } from "./weixin/message.js";
 import { createStderrLogger } from "./util/logger.js";
 import { formatLocalDateTime } from "./util/time.js";
 import { addToken, ensureDefaultTokens, readTokenStore, removeToken } from "./api/token_store.js";
+import {
+  addAllowedIp,
+  ensureDefaultAllowedIps,
+  readAllowedIpStore,
+  removeAllowedIp,
+} from "./api/allowed_ip_store.js";
 import { BridgeRuntime } from "./bridge/runtime.js";
 import { initializeCodexSession } from "./codex/initializer.js";
 
@@ -34,6 +40,9 @@ async function main(argv: string[]): Promise<void> {
       return;
     case "send-api-token":
       await tokenCommand(args.slice(1));
+      return;
+    case "send-api-allowed-ip":
+      await allowedIpCommand(args.slice(1));
       return;
     case "help":
     case "--help":
@@ -157,12 +166,12 @@ async function tokenCommand(args: string[]): Promise<void> {
   switch (subcommand) {
     case "ensure-defaults": {
       const store = await ensureDefaultTokens(tokenFile);
-      process.stdout.write(`Token file: ${tokenFile}\n`);
+      process.stdout.write(`令牌文件：${tokenFile}\n`);
       printTokenList(store);
       return;
     }
     case "list": {
-      process.stdout.write(`Token file: ${tokenFile}\n`);
+      process.stdout.write(`令牌文件：${tokenFile}\n`);
       printTokenList(await readTokenStore(tokenFile));
       return;
     }
@@ -189,6 +198,45 @@ async function tokenCommand(args: string[]): Promise<void> {
   }
 }
 
+async function allowedIpCommand(args: string[]): Promise<void> {
+  const allowedIpFile = defaultAllowedIpStoreFile(defaultStateDir());
+  const subcommand = args[0] ?? "list";
+  switch (subcommand) {
+    case "ensure-defaults": {
+      const ips = await ensureDefaultAllowedIps(allowedIpFile);
+      process.stdout.write(`IP 白名单文件：${allowedIpFile}\n`);
+      printAllowedIpList(ips);
+      return;
+    }
+    case "list": {
+      process.stdout.write(`IP 白名单文件：${allowedIpFile}\n`);
+      printAllowedIpList(await readAllowedIpStore(allowedIpFile));
+      return;
+    }
+    case "add": {
+      const ip = readOption(args, "--ip") ?? args[1];
+      if (!ip) {
+        throw new Error("用法：send-api-allowed-ip add --ip <IP>");
+      }
+      const ips = await addAllowedIp(allowedIpFile, ip);
+      process.stdout.write(`已添加 IP 白名单：${ip}\n`);
+      printAllowedIpList(ips);
+      return;
+    }
+    case "remove": {
+      const ip = readOption(args, "--ip") ?? args[1];
+      if (!ip) {
+        throw new Error("用法：send-api-allowed-ip remove --ip <IP>");
+      }
+      const removed = await removeAllowedIp(allowedIpFile, ip);
+      process.stdout.write(removed ? "已删除 IP 白名单。\n" : "未找到 IP 白名单。\n");
+      return;
+    }
+    default:
+      throw new Error(`未知 send-api-allowed-ip 命令：${subcommand}`);
+  }
+}
+
 function printTokenList(store: Awaited<ReturnType<typeof readTokenStore>>): void {
   const entries = Object.entries(store);
   if (!entries.length) {
@@ -197,6 +245,16 @@ function printTokenList(store: Awaited<ReturnType<typeof readTokenStore>>): void
   }
   for (const [token, record] of entries) {
     process.stdout.write(`${record.name}\t${token}\t${record.createdAt}\n`);
+  }
+}
+
+function printAllowedIpList(ips: string[]): void {
+  if (!ips.length) {
+    process.stdout.write("（没有 IP 白名单）\n");
+    return;
+  }
+  for (const ip of ips) {
+    process.stdout.write(`${ip}\n`);
   }
 }
 
@@ -233,6 +291,7 @@ function printHelp(): void {
   wechat-bridge-minimal weixin test-message
   wechat-bridge-minimal weixin serve
   wechat-bridge-minimal weixin send-api-token ensure-defaults|list|add|remove
+  wechat-bridge-minimal weixin send-api-allowed-ip ensure-defaults|list|add|remove
 `);
 }
 

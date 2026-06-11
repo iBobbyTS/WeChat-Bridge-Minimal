@@ -21,6 +21,7 @@ test("buildLaunchdPlist includes service runner, logs, and launchd keys", () => 
 test("defaultServiceEnvContent documents secure defaults", () => {
   const content = defaultServiceEnvContent();
   assert.match(content, /WECHAT_SEND_API_HOST=127\.0\.0\.1/);
+  assert.doesNotMatch(content, /WECHAT_SEND_API_ALLOWED_IPS/);
   assert.match(content, /WECHAT_TYPING_KEEPALIVE_MS=8000/);
   assert.match(content, /CODEX_SANDBOX=read-only/);
   assert.match(content, /CODEX_APPROVAL=never/);

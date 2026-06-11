@@ -4,19 +4,22 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { writeAllowedIpStore } from "../src/api/allowed_ip_store.js";
 import { addToken } from "../src/api/token_store.js";
-import { normalizeAllowedIps, startLocalSendApi } from "../src/api/local_send_api.js";
+import { startLocalSendApi } from "../src/api/local_send_api.js";
 
 test("local send API enforces token and forwards name-prefixed text", async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wcb-api-"));
   const tokenFile = path.join(dir, "tokens.json");
+  const allowedIpFile = path.join(dir, "allowed-ips.json");
   await addToken(tokenFile, "Laptop", "tok");
+  await writeAllowedIpStore(allowedIpFile, ["127.0.0.1"]);
   const sent: string[] = [];
   const server = await startLocalSendApi({
     host: "127.0.0.1",
     port: 0,
     tokenStoreFile: tokenFile,
-    allowedIps: normalizeAllowedIps(["127.0.0.1"]),
+    allowedIpStoreFile: allowedIpFile,
     targetUserId: "user-1",
     sendText: async (text) => {
       sent.push(text);
@@ -46,12 +49,14 @@ test("local send API enforces token and forwards name-prefixed text", async () =
 test("local send API returns fixed validation errors", async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wcb-api-"));
   const tokenFile = path.join(dir, "tokens.json");
+  const allowedIpFile = path.join(dir, "allowed-ips.json");
   await addToken(tokenFile, "Laptop", "tok");
+  await writeAllowedIpStore(allowedIpFile, ["127.0.0.1"]);
   const server = await startLocalSendApi({
     host: "127.0.0.1",
     port: 0,
     tokenStoreFile: tokenFile,
-    allowedIps: normalizeAllowedIps(["127.0.0.1"]),
+    allowedIpStoreFile: allowedIpFile,
     targetUserId: "user-1",
     maxBodyBytes: 4,
     sendText: async () => {
@@ -61,6 +66,33 @@ test("local send API returns fixed validation errors", async () => {
   try {
     assert.equal((await rawRequest(server.port, "POST", "/send", "{", "Bearer tok")).body.error, "invalid_json");
     assert.equal((await request(server.port, "POST", "/send", { text: "" }, "Bearer tok")).body.error, "request_body_too_large");
+  } finally {
+    await server.close();
+  }
+});
+
+test("local send API reloads IP allowlist from state file on each request", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wcb-api-"));
+  const tokenFile = path.join(dir, "tokens.json");
+  const allowedIpFile = path.join(dir, "allowed-ips.json");
+  await addToken(tokenFile, "Laptop", "tok");
+  await writeAllowedIpStore(allowedIpFile, []);
+  const server = await startLocalSendApi({
+    host: "127.0.0.1",
+    port: 0,
+    tokenStoreFile: tokenFile,
+    allowedIpStoreFile: allowedIpFile,
+    targetUserId: "user-1",
+    sendText: async () => ({ ok: true }),
+  });
+  try {
+    assert.deepEqual(
+      await request(server.port, "GET", "/health"),
+      { status: 403, body: { success: false, error: "forbidden_ip" } },
+    );
+
+    await writeAllowedIpStore(allowedIpFile, ["127.0.0.1"]);
+    assert.deepEqual(await request(server.port, "GET", "/health"), { status: 200, body: { success: true } });
   } finally {
     await server.close();
   }

@@ -1,5 +1,12 @@
 import path from "node:path";
-import { defaultAuthDir, defaultStateDir, defaultTokenStoreFile, parsePositiveInt, splitCsv } from "../config.js";
+import {
+  defaultAllowedIpStoreFile,
+  defaultAuthDir,
+  defaultStateDir,
+  defaultTokenStoreFile,
+  parsePositiveInt,
+} from "../config.js";
+import { ensureDefaultAllowedIps } from "../api/allowed_ip_store.js";
 import { WeixinAccountStore, type WeixinAccountData } from "../weixin/account_store.js";
 import { ContextTokenStore } from "../weixin/context_store.js";
 import { WeixinApiClient } from "../weixin/api.js";
@@ -9,7 +16,7 @@ import { readStartupUpdates } from "../weixin/update_stream.js";
 import type { WeixinMessage } from "../weixin/types.js";
 import { CodexRunner } from "../codex/runner.js";
 import { askCodexWithInitializedSession, createDefaultCodexRunnerOptions } from "../codex/initializer.js";
-import { normalizeAllowedIps, startLocalSendApi, type LocalSendApiBinding } from "../api/local_send_api.js";
+import { startLocalSendApi, type LocalSendApiBinding } from "../api/local_send_api.js";
 import type { Logger } from "../util/logger.js";
 import { createStderrLogger } from "../util/logger.js";
 
@@ -76,13 +83,13 @@ export class BridgeRuntime {
     });
     this.typingIndicator = this.createTypingIndicator(this.api);
     const targetUserId = process.env.WECHAT_TARGET_USER_ID?.trim() || this.account.userId;
+    const allowedIpStoreFile = defaultAllowedIpStoreFile(this.stateDir);
+    await ensureDefaultAllowedIps(allowedIpStoreFile);
     this.sendApi = await startLocalSendApi({
       host: process.env.WECHAT_SEND_API_HOST?.trim() || "127.0.0.1",
       port: this.sendApiPort ?? parsePositiveInt(process.env.WECHAT_SEND_API_PORT) ?? 55523,
       tokenStoreFile: process.env.WECHAT_SEND_API_TOKEN_FILE?.trim() || defaultTokenStoreFile(this.stateDir),
-      allowedIps: normalizeAllowedIps(splitCsv(process.env.WECHAT_SEND_API_ALLOWED_IPS).length > 0
-        ? splitCsv(process.env.WECHAT_SEND_API_ALLOWED_IPS)
-        : ["127.0.0.1", "localhost"]),
+      allowedIpStoreFile,
       targetUserId,
       sendText: (text) => this.sendTextToWeixin(targetUserId, text),
     });

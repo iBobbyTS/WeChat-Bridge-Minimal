@@ -12,9 +12,9 @@ npm run weixin:login
 
 登录成功后，按终端提示在手机微信里给桥接账号发送任意消息。程序会保存微信上下文令牌，并初始化 Codex session。
 
-## 2. 配置监听地址和 IP 白名单
+## 2. 配置监听地址
 
-默认情况下，本地发送 API 只监听 `127.0.0.1`，只能本机访问。如果需要让局域网内另一台电脑访问，需要把服务监听地址改成 `0.0.0.0`，并把另一台电脑的 IP 加入白名单。
+默认情况下，本地发送 API 只监听 `127.0.0.1`，只能本机访问。如果需要让局域网内另一台电脑访问，需要把服务监听地址改成 `0.0.0.0`。
 
 如果使用 launchd 服务启动，编辑：
 
@@ -27,7 +27,6 @@ npm run weixin:login
 ```env
 WECHAT_SEND_API_HOST=0.0.0.0
 WECHAT_SEND_API_PORT=55523
-WECHAT_SEND_API_ALLOWED_IPS=127.0.0.1,localhost,<另一台电脑IP>
 ```
 
 示例：
@@ -35,7 +34,6 @@ WECHAT_SEND_API_ALLOWED_IPS=127.0.0.1,localhost,<另一台电脑IP>
 ```env
 WECHAT_SEND_API_HOST=0.0.0.0
 WECHAT_SEND_API_PORT=55523
-WECHAT_SEND_API_ALLOWED_IPS=127.0.0.1,localhost,192.168.1.31
 ```
 
 如果只允许本机访问，保持默认值即可：
@@ -43,10 +41,43 @@ WECHAT_SEND_API_ALLOWED_IPS=127.0.0.1,localhost,192.168.1.31
 ```env
 WECHAT_SEND_API_HOST=127.0.0.1
 WECHAT_SEND_API_PORT=55523
-WECHAT_SEND_API_ALLOWED_IPS=127.0.0.1,localhost
 ```
 
-## 3. 创建或查看 token
+## 3. 配置 IP 白名单
+
+IP 白名单保存于：
+
+```text
+~/.config/wechat-bridge-minimal/state/send-api-allowed-ips.json
+```
+
+创建默认白名单：
+
+```bash
+npm run weixin:send-api-allowed-ip -- ensure-defaults
+```
+
+查看白名单：
+
+```bash
+npm run weixin:send-api-allowed-ip -- list
+```
+
+添加另一台电脑的 IP：
+
+```bash
+npm run weixin:send-api-allowed-ip -- add --ip "192.168.1.31"
+```
+
+删除 IP：
+
+```bash
+npm run weixin:send-api-allowed-ip -- remove --ip "192.168.1.31"
+```
+
+桥接服务每次收到请求都会重新读取 IP 白名单文件，所以新增或删除 IP 后不需要重启服务。
+
+## 4. 创建或查看 token
 
 生成默认 token：
 
@@ -80,7 +111,7 @@ token 文件默认保存于：
 
 桥接服务每次收到请求都会重新读取 token 文件，所以新增、删除或替换 token 后不需要重启服务。
 
-## 4. 启动或重启服务
+## 5. 启动或重启服务
 
 如果使用 launchd：
 
@@ -112,7 +143,7 @@ npm run weixin:serve
 Local send API listening on 0.0.0.0:55523
 ```
 
-## 5. 给另一台电脑的 agent 提供这些信息
+## 6. 给另一台电脑的 agent 提供这些信息
 
 只需要把以下三项提供给另一台电脑：
 
@@ -137,7 +168,7 @@ WECHAT_BRIDGE_SEND_API_NAME=PC-4070
 消息内容
 ```
 
-## 6. 本机快速验证
+## 7. 本机快速验证
 
 健康检查：
 
@@ -157,14 +188,14 @@ curl -X POST "http://127.0.0.1:55523/send" \
 如果另一台电脑无法访问，优先检查：
 
 - `WECHAT_SEND_API_HOST` 是否为 `0.0.0.0`
-- `WECHAT_SEND_API_ALLOWED_IPS` 是否包含另一台电脑的真实 IP
+- `send-api-allowed-ips.json` 是否包含另一台电脑的真实 IP
 - macOS 防火墙或局域网网络策略是否阻止了端口 `55523`
 - WeChat Bridge 服务是否已经重启并加载了新的 `service.env`
 
-## 7. 安全要求
+## 8. 安全要求
 
 - 不要把真实 token 提交到代码仓库。
 - 每台电脑使用单独 token，方便撤销。
-- 局域网访问时，只把必要 IP 加入 `WECHAT_SEND_API_ALLOWED_IPS`。
+- 局域网访问时，只把必要 IP 加入 `send-api-allowed-ips.json`。
 - 如果 token 泄露，立即执行 `remove` 删除旧 token，再创建新 token。
 - 这个 API 只用于发送消息到微信，不支持读取微信消息，也不会把 API 请求发送给 Codex。

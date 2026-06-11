@@ -14,6 +14,7 @@
     "weixin:serve": "tsx src/cli.ts weixin serve",
     "weixin:test-message": "tsx src/cli.ts weixin test-message",
     "weixin:send-api-token": "tsx src/cli.ts weixin send-api-token",
+    "weixin:send-api-allowed-ip": "tsx src/cli.ts weixin send-api-allowed-ip",
     "service:install": "bash scripts/service/install-launchd-user.sh",
     "service:status": "bash scripts/service/status-launchd-user.sh",
     "service:restart": "bash scripts/service/restart-launchd-user.sh",
