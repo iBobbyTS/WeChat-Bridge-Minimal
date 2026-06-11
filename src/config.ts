@@ -20,8 +20,12 @@ export function defaultTokenStoreFile(stateDir: string): string {
   return path.join(stateDir, "send-api-tokens.json");
 }
 
+export function defaultAuthDir(stateDir: string): string {
+  return path.join(stateDir, "auth");
+}
+
 export function defaultAccountsDir(stateDir: string): string {
-  return path.join(stateDir, "accounts");
+  return path.join(defaultAuthDir(stateDir), "accounts");
 }
 
 export function parsePositiveInt(value: unknown): number | null {

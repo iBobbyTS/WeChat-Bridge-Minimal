@@ -58,7 +58,7 @@ export class WeixinAccountStore {
   }
 
   async clearAll(): Promise<void> {
-    await fsp.rm(this.accountsDir, { recursive: true, force: true });
+    await fsp.rm(path.dirname(this.accountsDir), { recursive: true, force: true });
   }
 
   private accountPath(accountId: string): string {

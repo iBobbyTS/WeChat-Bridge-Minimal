@@ -30,6 +30,6 @@ export class ContextTokenStore {
   }
 
   private filePath(): string {
-    return path.join(this.stateDir, "context-tokens.json");
+    return path.join(this.stateDir, "auth", "context-tokens.json");
   }
 }
