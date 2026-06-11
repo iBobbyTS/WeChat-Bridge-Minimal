@@ -1,0 +1,32 @@
+{
+  "name": "wechat-bridge-minimal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal WeChat to Codex bridge with a local send-only API.",
+  "ilink_appid": "bot",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "start": "tsx src/cli.ts",
+    "weixin:login": "tsx src/cli.ts weixin login",
+    "weixin:serve": "tsx src/cli.ts weixin serve",
+    "weixin:send-api-token": "tsx src/cli.ts weixin send-api-token",
+    "service:install": "bash scripts/service/install-launchd-user.sh",
+    "service:status": "bash scripts/service/status-launchd-user.sh",
+    "service:restart": "bash scripts/service/restart-launchd-user.sh",
+    "service:logs": "bash scripts/service/logs-launchd-user.sh"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
