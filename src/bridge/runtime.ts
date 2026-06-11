@@ -6,6 +6,7 @@ import { WeixinUpdateCursorStore } from "../weixin/update_cursor_store.js";
 import { WeixinApiClient } from "../weixin/api.js";
 import { buildTextMessage, normalizeInboundMessage } from "../weixin/message.js";
 import { CodexRunner } from "../codex/runner.js";
+import { askCodexWithInitializedSession, createDefaultCodexRunnerOptions } from "../codex/initializer.js";
 import { normalizeAllowedIps, startLocalSendApi, type LocalSendApiBinding } from "../api/local_send_api.js";
 import type { Logger } from "../util/logger.js";
 import { createStderrLogger } from "../util/logger.js";
@@ -108,7 +109,13 @@ export class BridgeRuntime {
           if (inbound.contextToken) {
             await this.contextStore.set(inbound.senderId, inbound.contextToken);
           }
-          void codex.ask(inbound.text)
+          void askCodexWithInitializedSession({
+            stateDir: this.stateDir,
+            cwd: process.cwd(),
+            logger: this.logger,
+            runner: codex,
+            prompt: inbound.text,
+          })
             .then((reply) => this.sendTextToWeixin(inbound.senderId, reply))
             .catch((error) => {
               this.logger.error(`Codex 对话处理失败：${error instanceof Error ? error.message : String(error)}`);
@@ -123,15 +130,10 @@ export class BridgeRuntime {
   }
 
   private createCodexRunner(): CodexRunner {
-    return new CodexRunner({
+    return new CodexRunner(createDefaultCodexRunnerOptions({
       stateDir: this.stateDir,
-      cwd: path.resolve(process.env.CODEX_CWD?.trim() || process.cwd()),
-      codexBin: process.env.CODEX_BIN?.trim() || "codex",
-      model: process.env.CODEX_MODEL?.trim() || undefined,
-      profile: process.env.CODEX_PROFILE?.trim() || undefined,
-      sandbox: process.env.CODEX_SANDBOX?.trim() || "read-only",
-      approval: process.env.CODEX_APPROVAL?.trim() || "never",
-    });
+      cwd: process.cwd(),
+    }));
   }
 
   private requireApi(): WeixinApiClient {

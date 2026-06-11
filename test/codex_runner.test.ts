@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { CodexRunner } from "../src/codex/runner.js";
-import { findNewestCodexSessionForCwd } from "../src/codex/session_files.js";
+import { CodexRunner, MissingCodexThreadError } from "../src/codex/runner.js";
+import { findMatchingNewCodexSessionForCwd, findNewestCodexSessionForCwd, listCodexSessionFiles } from "../src/codex/session_files.js";
 
 test("findNewestCodexSessionForCwd reads Codex session meta", async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wcb-session-"));
@@ -21,6 +21,32 @@ test("findNewestCodexSessionForCwd reads Codex session meta", async () => {
 
   const found = findNewestCodexSessionForCwd({ sessionsRoot: path.join(dir, "sessions"), cwd, sinceMs: Date.now() - 1000 });
   assert.equal(found?.threadId, "thread-1");
+});
+
+test("findMatchingNewCodexSessionForCwd selects a new session that contains the full prompt", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wcb-session-match-"));
+  const cwd = path.join(dir, "workspace");
+  const sessionsRoot = path.join(dir, "sessions");
+  const sessionDir = path.join(sessionsRoot, "2026", "06", "10");
+  await fsp.mkdir(sessionDir, { recursive: true });
+  const oldFile = path.join(sessionDir, "rollout-old.jsonl");
+  const wrongNewFile = path.join(sessionDir, "rollout-wrong-newer.jsonl");
+  const matchedNewFile = path.join(sessionDir, "rollout-matched.jsonl");
+  const prompt = "完整用户消息\n第二行";
+
+  await writeSessionFile(oldFile, "old-thread", cwd, "旧消息", "2026-06-10T01:00:00.000Z");
+  const knownFiles = listCodexSessionFiles(sessionsRoot);
+  await writeSessionFile(matchedNewFile, "matched-thread", cwd, `用户：${prompt}`, "2026-06-10T01:01:00.000Z");
+  await writeSessionFile(wrongNewFile, "wrong-thread", cwd, "别的消息", "2026-06-10T01:02:00.000Z");
+
+  const found = findMatchingNewCodexSessionForCwd({
+    sessionsRoot,
+    cwd,
+    knownFiles,
+    prompt,
+  });
+
+  assert.equal(found?.threadId, "matched-thread");
 });
 
 test("CodexRunner creates first thread then resumes it serially", async () => {
@@ -51,10 +77,12 @@ test("CodexRunner creates first thread then resumes it serially", async () => {
         if (calls.length === 1) {
           const sessionDir = path.join(sessionsRoot, "2026", "06", "10");
           await fsp.mkdir(sessionDir, { recursive: true });
-          await fsp.writeFile(path.join(sessionDir, "rollout-thread-abc.jsonl"), `${JSON.stringify({
-            type: "session_meta",
-            payload: { id: "thread-abc", cwd: options?.cwd, timestamp: new Date().toISOString() },
-          })}\n`);
+          await writeSessionFile(
+            path.join(sessionDir, "rollout-thread-abc.jsonl"),
+            "thread-abc",
+            String(options?.cwd),
+            "one",
+          );
         }
         await fsp.writeFile(String(outputPath), `reply-${calls.length}`);
         child.emit("exit", 0);
@@ -77,3 +105,88 @@ test("CodexRunner creates first thread then resumes it serially", async () => {
   assert.deepEqual(calls[0]?.slice(-1), ["-"]);
   assert.deepEqual(calls[1]?.slice(-3), ["resume", "thread-abc", "-"]);
 });
+
+test("CodexRunner askExisting requires a saved thread and does not create one from user prompt", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wcb-runner-existing-"));
+  const cwd = path.join(dir, "workspace");
+  let spawnCount = 0;
+  const runner = new CodexRunner({
+    stateDir: dir,
+    cwd,
+    spawnImpl: (() => {
+      spawnCount += 1;
+      throw new Error("spawn should not run");
+    }) as never,
+  });
+
+  await assert.rejects(
+    () => runner.askExisting("用户首条复杂消息"),
+    MissingCodexThreadError,
+  );
+  assert.equal(spawnCount, 0);
+});
+
+test("CodexRunner refuses first thread when new sessions do not contain the full prompt", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wcb-runner-mismatch-"));
+  const cwd = path.join(dir, "workspace");
+  const sessionsRoot = path.join(dir, "sessions");
+  await fsp.mkdir(cwd, { recursive: true });
+
+  const runner = new CodexRunner({
+    stateDir: dir,
+    cwd,
+    sessionsRoot,
+    codexBin: "codex",
+    spawnImpl: ((_cmd: string, args: readonly string[], options?: { cwd?: string }) => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdin: PassThrough;
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      queueMicrotask(async () => {
+        const outputIndex = args.indexOf("--output-last-message");
+        const outputPath = outputIndex >= 0 ? args[outputIndex + 1] : "";
+        const sessionDir = path.join(sessionsRoot, "2026", "06", "10");
+        await fsp.mkdir(sessionDir, { recursive: true });
+        await writeSessionFile(
+          path.join(sessionDir, "rollout-thread-wrong.jsonl"),
+          "thread-wrong",
+          String(options?.cwd),
+          "只有部分用户消息",
+        );
+        await fsp.writeFile(String(outputPath), "reply");
+        child.emit("exit", 0);
+      });
+      return child as never;
+    }) as never,
+  });
+
+  await assert.rejects(
+    () => runner.ask("完整用户消息"),
+    /新增 session 必须匹配当前工作目录并包含本次完整用户消息/,
+  );
+});
+
+async function writeSessionFile(
+  filePath: string,
+  threadId: string,
+  cwd: string,
+  body: string,
+  timestamp = new Date().toISOString(),
+): Promise<void> {
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  await fsp.writeFile(filePath, [
+    JSON.stringify({
+      type: "session_meta",
+      payload: { id: threadId, cwd, timestamp },
+    }),
+    JSON.stringify({
+      type: "user_message",
+      payload: { text: body },
+    }),
+    "",
+  ].join("\n"));
+}

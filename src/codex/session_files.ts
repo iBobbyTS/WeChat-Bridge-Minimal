@@ -7,6 +7,10 @@ export interface CodexSessionSummary {
   updatedAtMs: number;
 }
 
+export function listCodexSessionFiles(root: string): string[] {
+  return listJsonlFiles(root);
+}
+
 export function findNewestCodexSessionForCwd(params: {
   sessionsRoot: string;
   cwd: string;
@@ -22,9 +26,7 @@ export function findNewestCodexSessionForCwd(params: {
     if (normalizePath(meta.cwd) !== normalizePath(params.cwd)) {
       continue;
     }
-    const stat = fs.statSync(filePath);
-    const timestampMs = meta.timestamp ? Date.parse(meta.timestamp) : Number.NaN;
-    const updatedAtMs = Math.max(stat.mtimeMs, Number.isFinite(timestampMs) ? timestampMs : 0);
+    const updatedAtMs = sessionUpdatedAtMs(filePath, meta.timestamp);
     if (updatedAtMs < params.sinceMs - 5_000) {
       continue;
     }
@@ -37,6 +39,38 @@ export function findNewestCodexSessionForCwd(params: {
     }
   }
   return best;
+}
+
+export function findMatchingNewCodexSessionForCwd(params: {
+  sessionsRoot: string;
+  cwd: string;
+  knownFiles: Iterable<string>;
+  prompt: string;
+}): CodexSessionSummary | null {
+  const known = new Set(Array.from(params.knownFiles, normalizePath));
+  const candidates = listJsonlFiles(params.sessionsRoot)
+    .filter((filePath) => !known.has(normalizePath(filePath)))
+    .map((filePath) => {
+      const meta = readSessionMeta(filePath);
+      if (!meta?.id || !meta.cwd || normalizePath(meta.cwd) !== normalizePath(params.cwd)) {
+        return null;
+      }
+      return {
+        threadId: meta.id,
+        filePath,
+        updatedAtMs: sessionUpdatedAtMs(filePath, meta.timestamp),
+      };
+    })
+    .filter((value): value is CodexSessionSummary => value !== null)
+    .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+
+  for (const candidate of candidates) {
+    // 这不是完整保护，只是简化的相对完整确认：新增 session 文件必须包含本次完整用户消息。
+    if (sessionFileContainsPrompt(candidate.filePath, params.prompt)) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 export function defaultCodexSessionsRoot(home = process.env.HOME ?? process.env.USERPROFILE ?? ""): string {
@@ -86,6 +120,53 @@ function readSessionMeta(filePath: string): { id?: string; cwd?: string; timesta
   } catch {
     return null;
   }
+}
+
+function sessionUpdatedAtMs(filePath: string, timestamp: string | undefined): number {
+  const stat = fs.statSync(filePath);
+  const timestampMs = timestamp ? Date.parse(timestamp) : Number.NaN;
+  return Math.max(stat.mtimeMs, Number.isFinite(timestampMs) ? timestampMs : 0);
+}
+
+function sessionFileContainsPrompt(filePath: string, prompt: string): boolean {
+  if (!prompt) {
+    return false;
+  }
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    if (content.includes(prompt)) {
+      return true;
+    }
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      try {
+        if (jsonValueContainsPrompt(JSON.parse(trimmed) as unknown, prompt)) {
+          return true;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function jsonValueContainsPrompt(value: unknown, prompt: string): boolean {
+  if (typeof value === "string") {
+    return value.includes(prompt);
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => jsonValueContainsPrompt(item, prompt));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).some((item) => jsonValueContainsPrompt(item, prompt));
+  }
+  return false;
 }
 
 function normalizePath(value: string): string {

@@ -18,6 +18,7 @@ import { createStderrLogger } from "./util/logger.js";
 import { formatLocalDateTime } from "./util/time.js";
 import { addToken, ensureDefaultTokens, readTokenStore, removeToken } from "./api/token_store.js";
 import { BridgeRuntime } from "./bridge/runtime.js";
+import { initializeCodexSession } from "./codex/initializer.js";
 
 async function main(argv: string[]): Promise<void> {
   const args = argv[0] === "weixin" ? argv.slice(1) : argv;
@@ -96,6 +97,18 @@ async function loginCommand(): Promise<void> {
     process.stdout.write("连接成功回执已发送到手机。\n");
   } catch (error) {
     process.stderr.write(`连接成功回执发送失败：${error instanceof Error ? error.message : String(error)}\n`);
+  }
+  try {
+    process.stdout.write("正在创建 Codex 会话并保存 session id...\n");
+    const codexSession = await initializeCodexSession({
+      stateDir,
+      cwd: process.cwd(),
+      logger,
+      forceNew: true,
+    });
+    process.stdout.write(`Codex 会话已创建并保存 session id：${codexSession.threadId ?? ""}\n`);
+  } catch (error) {
+    process.stderr.write(`Codex 会话创建失败：${error instanceof Error ? error.message : String(error)}\n`);
   }
 }
 
