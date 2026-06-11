@@ -2,9 +2,10 @@ import path from "node:path";
 import { defaultAuthDir, defaultStateDir, defaultTokenStoreFile, parsePositiveInt, splitCsv } from "../config.js";
 import { WeixinAccountStore, type WeixinAccountData } from "../weixin/account_store.js";
 import { ContextTokenStore } from "../weixin/context_store.js";
-import { WeixinUpdateCursorStore } from "../weixin/update_cursor_store.js";
 import { WeixinApiClient } from "../weixin/api.js";
 import { buildTextMessage, normalizeInboundMessage } from "../weixin/message.js";
+import { readStartupUpdates } from "../weixin/update_stream.js";
+import type { WeixinMessage } from "../weixin/types.js";
 import { CodexRunner } from "../codex/runner.js";
 import { askCodexWithInitializedSession, createDefaultCodexRunnerOptions } from "../codex/initializer.js";
 import { normalizeAllowedIps, startLocalSendApi, type LocalSendApiBinding } from "../api/local_send_api.js";
@@ -20,7 +21,6 @@ export class BridgeRuntime {
   private readonly stateDir: string;
   private readonly accountStore: WeixinAccountStore;
   private readonly contextStore: ContextTokenStore;
-  private readonly updateCursorStore: WeixinUpdateCursorStore;
   private readonly logger: Logger;
   private account: WeixinAccountData | null = null;
   private api: WeixinApiClient | null = null;
@@ -31,7 +31,6 @@ export class BridgeRuntime {
     this.stateDir = path.resolve(options.stateDir ?? defaultStateDir());
     this.accountStore = new WeixinAccountStore(defaultAuthDir(this.stateDir));
     this.contextStore = new ContextTokenStore(this.stateDir);
-    this.updateCursorStore = new WeixinUpdateCursorStore(this.stateDir);
     this.logger = options.logger ?? createStderrLogger(process.env.WECHAT_BRIDGE_DEBUG === "1");
   }
 
@@ -87,9 +86,28 @@ export class BridgeRuntime {
   }
 
   private async pollLoop(signal: AbortSignal): Promise<void> {
-    let getUpdatesBuf = await this.updateCursorStore.get();
-    let failureCount = 0;
     const codex = this.createCodexRunner();
+    let failureCount = 0;
+    let getUpdatesBuf = "";
+
+    while (!signal.aborted) {
+      try {
+        const startupUpdates = await readStartupUpdates({
+          api: this.requireApi(),
+          logger: this.logger,
+          signal,
+        });
+        getUpdatesBuf = startupUpdates.getUpdatesBuf;
+        failureCount = 0;
+        this.handleIncomingMessages(startupUpdates.msgs, codex);
+        break;
+      } catch (error) {
+        failureCount += 1;
+        this.logger.warn(`微信消息启动基线获取失败：${error instanceof Error ? error.message : String(error)}`);
+        await sleep(Math.min(30_000, 1_000 * 2 ** Math.min(failureCount, 5)));
+      }
+    }
+
     while (!signal.aborted) {
       try {
         const response = await this.requireApi().getUpdates({
@@ -98,34 +116,36 @@ export class BridgeRuntime {
         });
         failureCount = 0;
         getUpdatesBuf = response.get_updates_buf ?? getUpdatesBuf;
-        if (response.get_updates_buf !== undefined) {
-          await this.updateCursorStore.set(getUpdatesBuf);
-        }
-        for (const raw of response.msgs ?? []) {
-          const inbound = normalizeInboundMessage(raw);
-          if (!inbound || inbound.senderId !== this.account?.userId) {
-            continue;
-          }
-          if (inbound.contextToken) {
-            await this.contextStore.set(inbound.senderId, inbound.contextToken);
-          }
-          void askCodexWithInitializedSession({
-            stateDir: this.stateDir,
-            cwd: process.cwd(),
-            logger: this.logger,
-            runner: codex,
-            prompt: inbound.text,
-          })
-            .then((reply) => this.sendTextToWeixin(inbound.senderId, reply))
-            .catch((error) => {
-              this.logger.error(`Codex 对话处理失败：${error instanceof Error ? error.message : String(error)}`);
-            });
-        }
+        this.handleIncomingMessages(response.msgs ?? [], codex);
       } catch (error) {
         failureCount += 1;
         this.logger.warn(`微信消息轮询失败：${error instanceof Error ? error.message : String(error)}`);
         await sleep(Math.min(30_000, 1_000 * 2 ** Math.min(failureCount, 5)));
       }
+    }
+  }
+
+  private handleIncomingMessages(messages: WeixinMessage[], codex: CodexRunner): void {
+    for (const raw of messages) {
+      const inbound = normalizeInboundMessage(raw);
+      if (!inbound || inbound.senderId !== this.account?.userId) {
+        continue;
+      }
+      void (async () => {
+        if (inbound.contextToken) {
+          await this.contextStore.set(inbound.senderId, inbound.contextToken);
+        }
+        const reply = await askCodexWithInitializedSession({
+          stateDir: this.stateDir,
+          cwd: process.cwd(),
+          logger: this.logger,
+          runner: codex,
+          prompt: inbound.text,
+        });
+        await this.sendTextToWeixin(inbound.senderId, reply);
+      })().catch((error) => {
+        this.logger.error(`Codex 对话处理失败：${error instanceof Error ? error.message : String(error)}`);
+      });
     }
   }
 

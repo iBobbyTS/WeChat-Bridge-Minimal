@@ -6,7 +6,6 @@ import qrcode from "qrcode-terminal";
 import { defaultAuthDir, defaultStateDir, defaultTokenStoreFile } from "./config.js";
 import { WeixinAccountStore } from "./weixin/account_store.js";
 import { ContextTokenStore } from "./weixin/context_store.js";
-import { WeixinUpdateCursorStore } from "./weixin/update_cursor_store.js";
 import { loginWithQr } from "./weixin/login.js";
 import {
   sendLoginHandshakeReply,
@@ -50,7 +49,6 @@ async function loginCommand(): Promise<void> {
   const stateDir = defaultStateDir();
   const accountStore = new WeixinAccountStore(defaultAuthDir(stateDir));
   const contextStore = new ContextTokenStore(stateDir);
-  const updateCursorStore = new WeixinUpdateCursorStore(stateDir);
   const logger = createStderrLogger(true);
   if (await accountStore.hasAnyCredentials()) {
     const answer = await readLine("检测到已有微信登录凭证。是否删除已有凭证并重新登录？输入 y 删除并继续，其他输入退出：");
@@ -79,7 +77,6 @@ async function loginCommand(): Promise<void> {
   const handshake = await waitForLoginHandshakeMessage({
     api,
     contextStore,
-    updateCursorStore,
     targetUserId: result.account.userId,
     onIgnoredMessage: (reason, message) => {
       if (reason === "wrong_user" && message) {

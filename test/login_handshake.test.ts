@@ -18,7 +18,6 @@ test("buildLoginHandshakeReplyText includes successful connection text and curre
 test("waitForLoginHandshakeMessage ignores unrelated messages and saves target context token", async () => {
   const ignored: Array<{ reason: LoginHandshakeIgnoreReason; senderId?: string }> = [];
   const saved: Array<{ userId: string; token: string }> = [];
-  const cursors: string[] = [];
   const responses: GetUpdatesResp[] = [
     {
       get_updates_buf: "buf-1",
@@ -66,14 +65,6 @@ test("waitForLoginHandshakeMessage ignores unrelated messages and saves target c
         saved.push({ userId, token });
       },
     },
-    updateCursorStore: {
-      async get() {
-        return "saved-buf";
-      },
-      async set(getUpdatesBuf) {
-        cursors.push(getUpdatesBuf);
-      },
-    },
     targetUserId: "target-user",
     startedAtMs: 2_000_000_000_000,
     staleGraceMs: 100,
@@ -90,8 +81,7 @@ test("waitForLoginHandshakeMessage ignores unrelated messages and saves target c
     contextToken: "ctx-target",
   });
   assert.deepEqual(saved, [{ userId: "target-user", token: "ctx-target" }]);
-  assert.deepEqual(cursors, ["buf-1", "buf-2"]);
-  assert.deepEqual(requestedBufs, ["saved-buf", "buf-1"]);
+  assert.deepEqual(requestedBufs, ["", "buf-1"]);
   assert.deepEqual(ignored, [
     { reason: "wrong_user", senderId: "other-user" },
     { reason: "stale", senderId: "target-user" },

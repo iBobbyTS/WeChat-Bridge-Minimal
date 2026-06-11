@@ -16,7 +16,6 @@ test("WeixinAccountStore detects and clears auth directory regardless of account
   await fsp.mkdir(authDir, { recursive: true });
   await fsp.writeFile(path.join(authDir, "account.json"), "{");
   await fsp.writeFile(path.join(authDir, "context-tokens.json"), "{}");
-  await fsp.writeFile(path.join(authDir, "get-updates-cursor.json"), "{}");
   assert.equal(await store.hasAnyCredentials(), true);
   assert.equal(await store.load(), null);
 

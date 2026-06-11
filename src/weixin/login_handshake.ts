@@ -27,7 +27,6 @@ export type LoginHandshakeIgnoreReason =
 export interface LoginHandshakeWaitOptions {
   api: Pick<LoginHandshakeApi, "getUpdates">;
   contextStore: Pick<ContextTokenStore, "set">;
-  updateCursorStore?: { get(): Promise<string>; set(getUpdatesBuf: string): Promise<void> };
   targetUserId: string;
   timeoutMs?: number;
   pollTimeoutMs?: number;
@@ -51,7 +50,7 @@ export async function waitForLoginHandshakeMessage(options: LoginHandshakeWaitOp
   const startedAtMs = options.startedAtMs ?? Date.now();
   const staleGraceMs = options.staleGraceMs ?? 5_000;
   const deadline = Date.now() + timeoutMs;
-  let getUpdatesBuf = await options.updateCursorStore?.get() ?? "";
+  let getUpdatesBuf = "";
 
   while (Date.now() < deadline) {
     throwIfAborted(options.signal);
@@ -62,9 +61,6 @@ export async function waitForLoginHandshakeMessage(options: LoginHandshakeWaitOp
       signal: options.signal,
     });
     getUpdatesBuf = response.get_updates_buf ?? getUpdatesBuf;
-    if (response.get_updates_buf !== undefined) {
-      await options.updateCursorStore?.set(getUpdatesBuf);
-    }
 
     for (const raw of response.msgs ?? []) {
       const inbound = normalizeInboundMessage(raw);
