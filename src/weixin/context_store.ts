@@ -18,6 +18,16 @@ export class ContextTokenStore {
     await writeJsonPrivate(this.filePath(), data);
   }
 
+  async delete(userId: string): Promise<boolean> {
+    const data = await this.read();
+    if (!(userId in data)) {
+      return false;
+    }
+    delete data[userId];
+    await writeJsonPrivate(this.filePath(), data);
+    return true;
+  }
+
   private async read(): Promise<Record<string, string>> {
     const parsed = await readJsonFile<Record<string, unknown>>(this.filePath(), {});
     const normalized: Record<string, string> = {};

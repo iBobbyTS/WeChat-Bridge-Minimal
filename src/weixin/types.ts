@@ -82,6 +82,12 @@ export interface SendTypingResp {
   errmsg?: string;
 }
 
+export interface NotifyConnectionResp {
+  ret?: number;
+  errcode?: number;
+  errmsg?: string;
+}
+
 export interface QrCodeResponse {
   qrcode?: string;
   qrcode_img_content?: string;

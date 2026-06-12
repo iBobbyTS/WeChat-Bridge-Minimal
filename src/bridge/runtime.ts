@@ -9,7 +9,7 @@ import {
 import { ensureDefaultAllowedIps } from "../api/allowed_ip_store.js";
 import { WeixinAccountStore, type WeixinAccountData } from "../weixin/account_store.js";
 import { ContextTokenStore } from "../weixin/context_store.js";
-import { WeixinApiClient } from "../weixin/api.js";
+import { isStaleContextTokenError, WeixinApiClient } from "../weixin/api.js";
 import { buildTextMessage, normalizeInboundMessage } from "../weixin/message.js";
 import { WeixinTypingIndicator } from "../weixin/typing_indicator.js";
 import { readStartupUpdates } from "../weixin/update_stream.js";
@@ -23,7 +23,7 @@ import { createStderrLogger } from "../util/logger.js";
 export interface BridgeRuntimeOptions {
   stateDir?: string;
   logger?: Logger;
-  contextStore?: Pick<ContextTokenStore, "get" | "set">;
+  contextStore?: BridgeContextStore;
   sendApiPort?: number;
   apiFactory?: (account: WeixinAccountData) => BridgeWeixinApi;
   askCodex?: (params: {
@@ -40,12 +40,14 @@ export interface BridgeRuntimeOptions {
   }) => Pick<WeixinTypingIndicator, "runWhileTyping">;
 }
 
-type BridgeWeixinApi = Pick<WeixinApiClient, "getUpdates" | "sendMessage" | "getConfig" | "sendTyping">;
+type BridgeWeixinApi = Pick<WeixinApiClient, "getUpdates" | "sendMessage" | "getConfig" | "sendTyping">
+  & Partial<Pick<WeixinApiClient, "notifyStart" | "notifyStop">>;
+type BridgeContextStore = Pick<ContextTokenStore, "get" | "set"> & Partial<Pick<ContextTokenStore, "delete">>;
 
 export class BridgeRuntime {
   private readonly stateDir: string;
   private readonly accountStore: WeixinAccountStore;
-  private readonly contextStore: Pick<ContextTokenStore, "get" | "set">;
+  private readonly contextStore: BridgeContextStore;
   private readonly logger: Logger;
   private readonly sendApiPort?: number;
   private readonly apiFactory?: BridgeRuntimeOptions["apiFactory"];
@@ -81,6 +83,7 @@ export class BridgeRuntime {
       baseUrl: this.account.baseUrl,
       token: this.account.token,
     });
+    await this.notifyStart();
     this.typingIndicator = this.createTypingIndicator(this.api);
     const targetUserId = process.env.WECHAT_TARGET_USER_ID?.trim() || this.account.userId;
     const allowedIpStoreFile = defaultAllowedIpStoreFile(this.stateDir);
@@ -104,20 +107,53 @@ export class BridgeRuntime {
       await this.sendApi.close();
       this.sendApi = null;
     }
+    await this.notifyStop();
   }
 
-  async sendTextToWeixin(userId: string, text: string): Promise<{ delivered: true }> {
+  async sendTextToWeixin(userId: string, text: string): Promise<{ delivered: true; context: "stored" | "none" }> {
     const api = this.requireApi();
     const contextToken = await this.contextStore.get(userId);
     if (!contextToken) {
-      throw new Error("wechat_context_required");
+      await api.sendMessage(buildTextMessage({
+        toUserId: userId,
+        text,
+      }));
+      return { delivered: true, context: "none" };
     }
+    try {
+      await api.sendMessage(buildTextMessage({
+        toUserId: userId,
+        text,
+        contextToken,
+      }));
+      return { delivered: true, context: "stored" };
+    } catch (error) {
+      if (!isStaleContextTokenError(error)) {
+        throw error;
+      }
+      await this.contextStore.delete?.(userId);
+    }
+    try {
+      await api.sendMessage(buildTextMessage({
+        toUserId: userId,
+        text,
+      }));
+      return { delivered: true, context: "none" };
+    } catch (error) {
+      if (isStaleContextTokenError(error)) {
+        throw new Error("wechat_context_expired");
+      }
+      throw error;
+    }
+  }
+
+  private async sendReplyToWeixin(userId: string, text: string, contextToken?: string): Promise<void> {
+    const api = this.requireApi();
     await api.sendMessage(buildTextMessage({
       toUserId: userId,
       text,
       contextToken,
     }));
-    return { delivered: true };
   }
 
   private async pollLoop(signal: AbortSignal): Promise<void> {
@@ -190,7 +226,7 @@ export class BridgeRuntime {
         if (contextTokenSaveError) {
           throw new Error(`微信上下文令牌保存失败：${contextTokenSaveError instanceof Error ? contextTokenSaveError.message : String(contextTokenSaveError)}`);
         }
-        await this.sendTextToWeixin(inbound.senderId, reply);
+        await this.sendReplyToWeixin(inbound.senderId, reply, inbound.contextToken);
       })().catch((error) => {
         this.logger.error(`Codex 对话处理失败：${error instanceof Error ? error.message : String(error)}`);
       });
@@ -203,6 +239,28 @@ export class BridgeRuntime {
       cwd: process.cwd(),
       inputSender: this.account?.accountId,
     }));
+  }
+
+  private async notifyStart(): Promise<void> {
+    try {
+      const response = await this.api?.notifyStart?.();
+      if (response && ((response.ret ?? 0) !== 0 || (response.errcode ?? 0) !== 0)) {
+        this.logger.warn(`微信连接启动通知返回异常：ret=${String(response.ret ?? "")} errcode=${String(response.errcode ?? "")} errmsg=${String(response.errmsg ?? "")}`);
+      }
+    } catch (error) {
+      this.logger.warn(`微信连接启动通知失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async notifyStop(): Promise<void> {
+    try {
+      const response = await this.api?.notifyStop?.();
+      if (response && ((response.ret ?? 0) !== 0 || (response.errcode ?? 0) !== 0)) {
+        this.logger.warn(`微信连接停止通知返回异常：ret=${String(response.ret ?? "")} errcode=${String(response.errcode ?? "")} errmsg=${String(response.errmsg ?? "")}`);
+      }
+    } catch (error) {
+      this.logger.warn(`微信连接停止通知失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private createTypingIndicator(api: BridgeWeixinApi): Pick<WeixinTypingIndicator, "runWhileTyping"> {

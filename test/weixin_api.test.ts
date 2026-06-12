@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { WeixinApiClient, WeixinApiResponseError } from "../src/weixin/api.js";
+import { isStaleContextTokenError, WeixinApiClient, WeixinApiResponseError } from "../src/weixin/api.js";
 import { buildTextMessage, extractTextFromItems, normalizeInboundMessage } from "../src/weixin/message.js";
 import { MessageItemType, MessageType, type SendMessageReq } from "../src/weixin/types.js";
 
@@ -86,10 +86,43 @@ test("WeixinApiClient builds getconfig and sendtyping payloads", async () => {
   assert.equal(calls[0]?.url, "https://example.invalid/ilink/bot/getconfig");
   assert.equal(calls[0]?.body.ilink_user_id, "user-1");
   assert.equal(calls[0]?.body.context_token, "ctx-token");
+  assert.deepEqual(calls[0]?.body.base_info, {
+    channel_version: "0.1.0",
+    bot_agent: "WeChatBridgeMinimal/0.1.0",
+  });
   assert.equal(calls[1]?.url, "https://example.invalid/ilink/bot/sendtyping");
   assert.equal(calls[1]?.body.ilink_user_id, "user-1");
   assert.equal(calls[1]?.body.typing_ticket, "ticket-1");
   assert.equal(calls[1]?.body.status, 1);
+  assert.deepEqual(calls[1]?.body.base_info, {
+    channel_version: "0.1.0",
+    bot_agent: "WeChatBridgeMinimal/0.1.0",
+  });
+});
+
+test("WeixinApiClient sends official connection notifications", async () => {
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const client = new WeixinApiClient({
+    baseUrl: "https://example.invalid",
+    token: "secret",
+    fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      });
+      return new Response(JSON.stringify({ ret: 0 }), { status: 200 });
+    }) as typeof fetch,
+  });
+
+  await client.notifyStart();
+  await client.notifyStop();
+
+  assert.equal(calls[0]?.url, "https://example.invalid/ilink/bot/msg/notifystart");
+  assert.deepEqual(calls[0]?.body.base_info, {
+    channel_version: "0.1.0",
+    bot_agent: "WeChatBridgeMinimal/0.1.0",
+  });
+  assert.equal(calls[1]?.url, "https://example.invalid/ilink/bot/msg/notifystop");
 });
 
 test("WeixinApiClient treats non-zero Weixin ret as failure", async () => {
@@ -108,6 +141,23 @@ test("WeixinApiClient treats non-zero Weixin ret as failure", async () => {
       text: "已成功连接。\n当前时间：2026-06-11 01:02:03。",
     })),
     WeixinApiResponseError,
+  );
+});
+
+test("isStaleContextTokenError recognizes ret -2 responses", async () => {
+  const client = new WeixinApiClient({
+    baseUrl: "https://example.invalid",
+    token: "secret",
+    fetchImpl: (async () => new Response(JSON.stringify({ ret: -2 }), { status: 200 })) as typeof fetch,
+  });
+
+  await assert.rejects(
+    () => client.sendMessage(buildTextMessage({
+      toUserId: "user-1",
+      text: "hello",
+      contextToken: "old-context",
+    })),
+    (error) => isStaleContextTokenError(error),
   );
 });
 

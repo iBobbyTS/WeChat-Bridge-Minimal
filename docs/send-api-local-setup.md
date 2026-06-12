@@ -16,7 +16,7 @@ npm run weixin:login
 
 默认情况下，本地发送 API 只监听 `127.0.0.1`，只能本机访问。如果需要让局域网内另一台电脑访问，需要把服务监听地址改成 `0.0.0.0`。
 
-如果使用 launchd 服务启动，编辑：
+编辑：
 
 ```text
 ~/.config/wechat-bridge-minimal/service.env
@@ -131,7 +131,7 @@ npm run service:status
 npm run service:logs
 ```
 
-如果手动启动：
+如果手动启动，`npm run weixin:serve` 也会读取同一份 `service.env`：
 
 ```bash
 npm run weixin:serve
@@ -191,6 +191,8 @@ curl -X POST "http://127.0.0.1:55523/send" \
 - `send-api-allowed-ips.json` 是否包含另一台电脑的真实 IP
 - macOS 防火墙或局域网网络策略是否阻止了端口 `55523`
 - WeChat Bridge 服务是否已经重启并加载了新的 `service.env`
+
+如果健康检查正常但发送返回 `wechat_context_expired` 或 `send_failed`，请先在手机微信里给桥接账号发送任意一条消息刷新微信上下文，再重试发送。微信的 `context_token` 来自用户入站消息，不适合作为长期稳定的主动推送凭证。
 
 ## 8. 安全要求
 

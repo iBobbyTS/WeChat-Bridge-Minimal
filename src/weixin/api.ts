@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type {
   GetConfigResp,
   GetUpdatesResp,
+  NotifyConnectionResp,
   QrCodeResponse,
   QrStatusResponse,
   SendMessageReq,
@@ -52,6 +53,13 @@ export class WeixinApiResponseError extends Error {
     super(`${label} 返回失败：ret=${String(body.ret ?? "")} errcode=${String(body.errcode ?? "")} errmsg=${String(body.errmsg ?? "")}`);
     this.name = "WeixinApiResponseError";
   }
+}
+
+export function isStaleContextTokenError(error: unknown): boolean {
+  if (!(error instanceof WeixinApiResponseError)) {
+    return false;
+  }
+  return numericField(error.body.ret) === -2 || numericField(error.body.errcode) === -2;
 }
 
 export class WeixinApiClient {
@@ -155,6 +163,7 @@ export class WeixinApiClient {
       body: {
         ilink_user_id: params.userId,
         ...(params.contextToken ? { context_token: params.contextToken } : {}),
+        base_info: this.buildBaseInfo(),
       },
       timeoutMs: params.timeoutMs ?? 15_000,
     });
@@ -173,8 +182,31 @@ export class WeixinApiClient {
         ilink_user_id: params.userId,
         typing_ticket: params.typingTicket,
         status: params.status,
+        base_info: this.buildBaseInfo(),
       },
       timeoutMs: params.timeoutMs ?? 15_000,
+    });
+  }
+
+  async notifyStart(timeoutMs = 10_000): Promise<NotifyConnectionResp> {
+    return this.postJson<NotifyConnectionResp>({
+      endpoint: "ilink/bot/msg/notifystart",
+      label: "notifyStart",
+      body: {
+        base_info: this.buildBaseInfo(),
+      },
+      timeoutMs,
+    });
+  }
+
+  async notifyStop(timeoutMs = 10_000): Promise<NotifyConnectionResp> {
+    return this.postJson<NotifyConnectionResp>({
+      endpoint: "ilink/bot/msg/notifystop",
+      label: "notifyStop",
+      body: {
+        base_info: this.buildBaseInfo(),
+      },
+      timeoutMs,
     });
   }
 

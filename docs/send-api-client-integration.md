@@ -120,7 +120,7 @@ if __name__ == "__main__":
 | 400 | `invalid_json` | 请求体不是合法 JSON | 修正 JSON 序列化 |
 | 400 | `request_body_too_large` | 请求体超过限制 | 缩短消息，当前限制 64 KiB |
 | 400 | `text_required` | `text` 缺失、不是字符串或为空 | 传入非空字符串 |
-| 502 | `context_required` 或其他上下文错误 | 服务端缺少必要上下文，暂时无法发送 | 联系服务提供方处理 |
+| 502 | `wechat_context_expired` | 服务端发送上下文已失效，暂时无法发送 | 联系服务提供方刷新上下文 |
 | 502 | `send_failed` | 服务端发送失败 | 稍后重试，或联系服务提供方查看日志 |
 | 404 | `not_found` | 请求路径或方法不是支持的接口 | 使用 `GET /health` 或 `POST /send` |
 

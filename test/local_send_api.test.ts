@@ -58,13 +58,35 @@ test("local send API returns fixed validation errors", async () => {
     tokenStoreFile: tokenFile,
     allowedIpStoreFile: allowedIpFile,
     targetUserId: "user-1",
-    maxBodyBytes: 4,
+    maxBodyBytes: 64 * 1024,
     sendText: async () => {
-      throw new Error("wechat_context_required");
+      throw new Error("wechat_context_expired");
     },
   });
   try {
     assert.equal((await rawRequest(server.port, "POST", "/send", "{", "Bearer tok")).body.error, "invalid_json");
+    assert.equal((await request(server.port, "POST", "/send", { text: "ok" }, "Bearer tok")).body.error, "wechat_context_expired");
+  } finally {
+    await server.close();
+  }
+});
+
+test("local send API returns request_body_too_large before parsing JSON", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "wcb-api-"));
+  const tokenFile = path.join(dir, "tokens.json");
+  const allowedIpFile = path.join(dir, "allowed-ips.json");
+  await addToken(tokenFile, "Laptop", "tok");
+  await writeAllowedIpStore(allowedIpFile, ["127.0.0.1"]);
+  const server = await startLocalSendApi({
+    host: "127.0.0.1",
+    port: 0,
+    tokenStoreFile: tokenFile,
+    allowedIpStoreFile: allowedIpFile,
+    targetUserId: "user-1",
+    maxBodyBytes: 4,
+    sendText: async () => ({ ok: true }),
+  });
+  try {
     assert.equal((await request(server.port, "POST", "/send", { text: "" }, "Bearer tok")).body.error, "request_body_too_large");
   } finally {
     await server.close();

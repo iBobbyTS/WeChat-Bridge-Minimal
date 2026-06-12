@@ -94,7 +94,7 @@ export async function handleLocalSendApiRequest(
     const message = error instanceof Error ? error.message : String(error);
     writeJson(response, 502, {
       success: false,
-      error: message === "wechat_context_required" ? "wechat_context_required" : "send_failed",
+      error: message === "wechat_context_expired" ? "wechat_context_expired" : "send_failed",
     });
   }
 }

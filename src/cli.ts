@@ -3,7 +3,13 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
-import { defaultAllowedIpStoreFile, defaultAuthDir, defaultStateDir, defaultTokenStoreFile } from "./config.js";
+import {
+  defaultAllowedIpStoreFile,
+  defaultAuthDir,
+  defaultServiceEnvFile,
+  defaultStateDir,
+  defaultTokenStoreFile,
+} from "./config.js";
 import { WeixinAccountStore } from "./weixin/account_store.js";
 import { ContextTokenStore } from "./weixin/context_store.js";
 import { loginWithQr } from "./weixin/login.js";
@@ -11,7 +17,7 @@ import {
   sendLoginHandshakeReply,
   waitForLoginHandshakeMessage,
 } from "./weixin/login_handshake.js";
-import { WeixinApiClient } from "./weixin/api.js";
+import { isStaleContextTokenError, WeixinApiClient } from "./weixin/api.js";
 import { buildTextMessage } from "./weixin/message.js";
 import { createStderrLogger } from "./util/logger.js";
 import { formatLocalDateTime } from "./util/time.js";
@@ -24,8 +30,10 @@ import {
 } from "./api/allowed_ip_store.js";
 import { BridgeRuntime } from "./bridge/runtime.js";
 import { initializeCodexSession } from "./codex/initializer.js";
+import { loadEnvFile } from "./util/env_file.js";
 
 async function main(argv: string[]): Promise<void> {
+  await loadCliEnvFile();
   const args = argv[0] === "weixin" ? argv.slice(1) : argv;
   const command = args[0] ?? "help";
   switch (command) {
@@ -52,6 +60,11 @@ async function main(argv: string[]): Promise<void> {
     default:
       throw new Error(`未知命令：${command}`);
   }
+}
+
+async function loadCliEnvFile(): Promise<void> {
+  const envFile = process.env.SERVICE_ENV_FILE?.trim() || defaultServiceEnvFile();
+  await loadEnvFile(envFile, { override: false });
 }
 
 async function loginCommand(): Promise<void> {
@@ -129,22 +142,57 @@ async function testMessageCommand(): Promise<void> {
   }
   const text = buildTestMessageText();
   const contextToken = await contextStore.get(account.userId);
-  assertContextToken(contextToken);
   const api = new WeixinApiClient({
     baseUrl: account.baseUrl,
     token: account.token,
   });
-  await api.sendMessage(buildTextMessage({
-    toUserId: account.userId,
+  await sendTextWithOptionalStoredContext({
+    api,
+    contextStore,
+    userId: account.userId,
     text,
     contextToken,
-  }));
+  });
   process.stdout.write(`测试消息已发送到手机：${account.userId}\n`);
 }
 
-function assertContextToken(contextToken: string | null): asserts contextToken is string {
-  if (!contextToken) {
-    throw new Error("没有可用的微信上下文令牌。请先在手机微信里给桥接账号发送任意一条消息，然后再重试。");
+async function sendTextWithOptionalStoredContext(params: {
+  api: Pick<WeixinApiClient, "sendMessage">;
+  contextStore: Pick<ContextTokenStore, "delete">;
+  userId: string;
+  text: string;
+  contextToken: string | null;
+}): Promise<void> {
+  if (!params.contextToken) {
+    await params.api.sendMessage(buildTextMessage({
+      toUserId: params.userId,
+      text: params.text,
+    }));
+    return;
+  }
+  try {
+    await params.api.sendMessage(buildTextMessage({
+      toUserId: params.userId,
+      text: params.text,
+      contextToken: params.contextToken,
+    }));
+  } catch (error) {
+    if (!isStaleContextTokenError(error)) {
+      throw error;
+    }
+    await params.contextStore.delete(params.userId);
+    process.stderr.write("已保存的微信上下文令牌已失效，正在不带上下文重试发送。\n");
+    try {
+      await params.api.sendMessage(buildTextMessage({
+        toUserId: params.userId,
+        text: params.text,
+      }));
+    } catch (retryError) {
+      if (isStaleContextTokenError(retryError)) {
+        throw new Error("微信上下文令牌已失效。请先在手机微信里给桥接账号发送任意一条消息刷新上下文，然后再重试。");
+      }
+      throw retryError;
+    }
   }
 }
 

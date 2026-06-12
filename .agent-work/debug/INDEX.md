@@ -7,6 +7,7 @@
 
 | file | summary |
 | --- | --- |
+| unresolved/weixin-sendmessage-ret-2.md | 已定位几小时后 test-message/sendmessage ret=-2 与微信 context token 失效相关；代码已补官方 start/stop/base_info 和明确错误，等待手机发消息刷新上下文后验证。 |
 
 ## Resolved
 
